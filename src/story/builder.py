@@ -27,6 +27,13 @@ from src.story.stem_curves import extract_stem_curves
 
 SCHEMA_VERSION = "1.1.0"
 
+# Step 4b stops gluing same-role neighbors once the merged span would pass
+# this. Measured 2026-10-01 over 9 library songs: well-segmented songs top out
+# at 21-35s per section; the only longer ones (63-89s) were same-role
+# subdivisions of one segmentino block collapsed back together, which left a
+# single theme/rotation running for over a minute.
+_MAX_MERGED_SECTION_MS = 40_000
+
 
 def _portable_audio_path(audio_path: str | Path) -> str:
     """Return a show-dir-relative path for storage in story JSON.
@@ -290,7 +297,10 @@ def build_song_story(
             merged_labels
             and (merged_labels[-1] is None or label is None or merged_labels[-1] == label)
         )
-        if same_role and compatible_label:
+        fits_cap = bool(merged_sections) and (
+            sec[1] - merged_sections[-1][0] <= _MAX_MERGED_SECTION_MS
+        )
+        if same_role and compatible_label and fits_cap:
             prev_start = merged_sections[-1][0]
             merged_sections[-1] = (prev_start, sec[1])
             if role["confidence"] > merged_roles[-1]["confidence"]:

@@ -675,3 +675,57 @@ passes with it. Full regression sweep: `test_builder.py`,
 `test_story_builder_refinement.py` (integration), `test_story_serialization.py`,
 `test_story_builder_ssm_validator.py`, `test_story_pipeline.py` (integration)
 — 102 passed, no regressions.
+
+## 2026-10-01 — Step 4b caps merged section length at 40s
+
+**Files:** `src/story/builder.py`
+
+**Problem:** On "Magic Mirror" the whole 10.3-99.2s span came out as ONE 89s
+"chorus" at `energy_score` 0 / level "low". That gave it a single theme
+("Tracer Fire") for 89 seconds and, because "low" energy maps to
+`active_tiers` [1, 2, 3], left every tier-4/6 group (all beat and prop groups)
+empty for the whole span; only the hero groups ran, repeating the same
+2-layer Spirals + per-beat Shockwave. Reported by the user from a real export.
+
+**Root cause:** segmentino produced ONE 99s block labelled "N1" with five inner
+boundaries stamped "qm_boundary". `merge_sections` correctly kept all six
+sub-sections, but each inherited the label "N1" (`_dominant_label` fallback),
+so all six were classed chorus with the same label, and Step 4b (merge adjacent
+same-role, label-compatible sections) glued them back into one 89s section.
+Confirmed by tracing `merge_sections` / labels / `classify_section_roles` on the
+song's cached hierarchy before changing anything.
+
+**Fix:** Step 4b refuses a merge once the merged span would exceed
+`_MAX_MERGED_SECTION_MS` (40s). Measured over 9 library songs: sections of
+well-segmented songs top out at 21-35s; the only longer ones were same-role
+subdivisions glued back together (Magic Mirror 89s, Christmas Time Is Here 76s,
+Chattahoochee 63s).
+
+**Tried and rejected the same day (do not retry):**
+- Counting a label's repeats as *runs* of consecutive same-label sections in
+  `_classify_by_labels`: breaks `test_step4b_merge_does_not_glue_different_
+  labels_sharing_a_role` (real segmentino output labels back-to-back repeats
+  "A","A" on separate boundaries; a run count calls that one occurrence) and
+  changed roles in 6/9 library songs.
+- Giving only the first section per labelled boundary the inherited label (rest
+  `None`) in the builder's label derivation: changed 8/9 library songs,
+  including previously fine ones (It's Raining Tacos Again, 1999), and dropped
+  choruses. The per-section inherited-label count is evidently carrying real
+  chorus detection in many songs; the cap leaves it alone.
+
+**Effect on the 9 library songs** (same harness, old vs new code, transcription
+and lyric lookup stubbed so only this change differs): 5 unchanged-or-split-only
+roles. Magic Mirror 5 -> 7 sections (chorus 0-99s now 0-29 / 29-66 / 66-99, role
+unchanged); Christmas Time Is Here, Chattahoochee, Shake the Snow Globe, With A
+Little Help From My Friends: an over-long same-role span split, no role changes.
+Tacos, 1999, Dream On, Ashes Last identical.
+
+**Not changed (still open):** Magic Mirror's first two sub-sections still
+normalize to "low" energy (Step 5b min->max across the song's sections, and the
+later sections score 93-100), so they still only light tiers 1-3. A section
+that is quiet *relative to the song* is by design, but worth revisiting if long
+quiet-chorus spans keep leaving props dark.
+
+**Test:** `test_long_subdivided_block_is_not_collapsed_into_one_section`
+(`tests/unit/test_builder.py`) - confirmed to fail without the cap (stashed
+`builder.py`, reran) and pass with it.

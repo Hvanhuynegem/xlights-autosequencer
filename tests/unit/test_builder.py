@@ -488,3 +488,62 @@ def test_step4b_merge_does_not_glue_different_labels_sharing_a_role():
         "expected B and D to remain two separate 'verse' sections despite "
         f"sharing a role, got {[(s['start'], s['end']) for s in verse_sections]}"
     )
+
+
+# ---------------------------------------------------------------------------
+# A long segmentino block subdivided at QM boundaries must not be collapsed
+# back into one giant section (Magic Mirror: one 89s "chorus", one theme).
+# ---------------------------------------------------------------------------
+
+def _long_block_subdivided_hierarchy():
+    """160s song: one 100s N1 block with 3 QM-boundary subdivisions, then A/B/A/N3.
+
+    Every N1 subdivision inherits the label "N1", so they share a role and a
+    label; pre-fix Step 4b glued them into a single 100s section.
+    """
+    from tests.fixtures.story_fixture import make_hierarchy_dict
+
+    d = make_hierarchy_dict(duration_ms=160_000)
+    d["sections"] = [
+        {"time_ms": 0, "label": "N1"},
+        {"time_ms": 25_000, "label": "qm_boundary"},
+        {"time_ms": 50_000, "label": "qm_boundary"},
+        {"time_ms": 75_000, "label": "qm_boundary"},
+        {"time_ms": 100_000, "label": "A"},
+        {"time_ms": 115_000, "label": "B"},
+        {"time_ms": 130_000, "label": "A"},
+        {"time_ms": 145_000, "label": "N3"},
+    ]
+
+    def _energy_at(t_sec: float) -> float:
+        if t_sec < 100:
+            return 0.5  # N1 block
+        if t_sec < 115 or 130 <= t_sec < 145:
+            return 0.9  # A (the real chorus)
+        return 0.5 if t_sec < 130 else 0.1
+
+    def _vocals_at(t_sec: float) -> float:
+        return 0.6 if t_sec < 145 else 0.0
+
+    frames = 1600  # 160s * 10fps
+    d["energy_curves"] = {
+        "full_mix": {
+            "sample_rate": 10.0,
+            "values": [round(_energy_at(i / 10), 3) for i in range(frames)],
+        },
+        "vocals": {
+            "sample_rate": 10.0,
+            "values": [round(_vocals_at(i / 10), 3) for i in range(frames)],
+        },
+    }
+    return d
+
+
+def test_long_subdivided_block_is_not_collapsed_into_one_section():
+    result = build_song_story(_long_block_subdivided_hierarchy(), AUDIO_PATH)
+    spans = [(s["start"], s["end"], s["role"]) for s in result["sections"]]
+
+    longest = max(end - start for start, end, _ in spans)
+    assert longest <= 40, (
+        f"a section runs {longest}s, expected the 100s N1 block to stay split: {spans}"
+    )
