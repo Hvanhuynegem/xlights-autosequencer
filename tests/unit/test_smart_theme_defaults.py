@@ -101,3 +101,29 @@ class TestSmartDefaults:
         for a in assignments:
             assert a["theme_id"] in catalog_ids
             assert a["theme_id"] == _slugify(a["theme_id"])
+
+
+class TestChorusNeverAutoEthereal:
+    """A quiet-for-this-song chorus must keep prop tiers (Magic Mirror, 2026-10-01)."""
+
+    @staticmethod
+    def _story(role, energy_score, **extra):
+        sec = {
+            "role": role, "start": 0.0, "end": 30.0,
+            "character": {"energy_score": energy_score},
+            "lighting": {"moment_count": 0}, "overrides": {},
+        }
+        return {"sections": [sec], "preferences": extra}
+
+    def test_low_energy_chorus_is_structural_not_ethereal(self):
+        from src.generator.plan import _section_energies_from_story
+        assert _section_energies_from_story(self._story("chorus", 0))[0].mood_tier == "structural"
+
+    def test_low_energy_verse_is_still_ethereal(self):
+        from src.generator.plan import _section_energies_from_story
+        assert _section_energies_from_story(self._story("verse", 0))[0].mood_tier == "ethereal"
+
+    def test_explicit_song_mood_still_wins_for_a_chorus(self):
+        from src.generator.plan import _section_energies_from_story
+        energies = _section_energies_from_story(self._story("chorus", 0, mood="ethereal"))
+        assert energies[0].mood_tier == "ethereal"

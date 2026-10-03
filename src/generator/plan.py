@@ -9,6 +9,7 @@ logger = logging.getLogger(__name__)
 
 from src.analyzer.result import HierarchyResult
 from src.effects.library import EffectLibrary, load_effect_library
+from src.generator.direction_alternation import alternate_direction_by_bar_block
 from src.generator.effect_placer import (
     _IMPACT_ENERGY_GATE,
     _IMPACT_MIN_DURATION_MS,
@@ -622,6 +623,13 @@ def build_plan(
             existing_layers=existing_layers,
         )
 
+    # 4b. Alternate direction every other 4-bar block of fixed-direction runs
+    # (a long section otherwise plays one effect one way for its whole length).
+    bars_track = getattr(hierarchy, "bars", None)
+    alternate_direction_by_bar_block(
+        assignments, [m.time_ms for m in bars_track.marks] if bars_track else [],
+    )
+
     # 5. Value curves — generate for each placement when curves are enabled
     if config.curves_mode != "none":
         for assignment in assignments:
@@ -990,6 +998,15 @@ def _derive_anchor_accent_palette(assignments: list[SectionAssignment]) -> list[
     return accent
 
 
+# Roles that never auto-derive the "ethereal" mood tier. Energy is rescaled
+# across the song's own sections, so a chorus that is merely quiet next to
+# louder verses scores low and would be "ethereal" -- BASE + HERO only, every
+# prop group dark -- for a stretch the viewer reads as the main part of the
+# song (Magic Mirror, 2026-10-01). Same roles lighting_mapper runs in "full"
+# mode. An explicit per-section or song-wide mood still wins.
+_FULL_SHOW_ROLES = frozenset({"chorus", "climax"})
+
+
 def _section_energies_from_story(story: dict) -> list[SectionEnergy]:
     """Convert song story sections to SectionEnergy objects.
 
@@ -1004,11 +1021,10 @@ def _section_energies_from_story(story: dict) -> list[SectionEnergy]:
     for sec in story.get("sections", []):
         overrides = sec.get("overrides", {})
         # Three-level precedence for mood
-        mood = (
-            overrides.get("mood")
-            or global_mood
-            or energy_to_mood(sec["character"]["energy_score"])
-        )
+        auto_mood = energy_to_mood(sec["character"]["energy_score"])
+        if auto_mood == "ethereal" and sec.get("role") in _FULL_SHOW_ROLES:
+            auto_mood = "structural"
+        mood = overrides.get("mood") or global_mood or auto_mood
         energy_score = sec["character"]["energy_score"]
         # Apply per-section intensity scaler to energy score
         section_intensity = overrides.get("intensity") or 1.0
