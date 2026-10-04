@@ -62,11 +62,13 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cargo/bin/cargo-tauri.exe
-          key: cargo-tauri-cli-2.x-${{ runner.os }}
+          key: cargo-tauri-cli-2.11.4-${{ runner.os }}
 
       - name: Install cargo-tauri CLI
         if: steps.cargo-tauri-cache.outputs.cache-hit != 'true'
-        run: cargo install tauri-cli --version "^2.0.0" --locked
+        # Pinned: tauri-cli 2.12.1's NSIS template fails with
+        # 'macro named "RestartManager_StartSession" not found' (v0.1.10 CI).
+        run: cargo install tauri-cli --version "=2.11.4" --locked
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
