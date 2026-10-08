@@ -4,6 +4,10 @@ XLight AutoSequencer analyzes audio files and produces timing data for xLights h
 
 ## Documentation Index
 
+Start with the **[README Quick Start](../README.md#quick-start)** for the
+maintained song-to-xLights walkthrough, including package extraction,
+existing-show preparation, Power Groups, and rendering and previewing.
+
 ### Core Concepts
 - **[Architecture Overview](architecture-overview.md)** — System diagram, component roles, data flow
 - **[Analysis Pipeline](pipeline.md)** — End-to-end walkthrough from MP3 to xLights export
@@ -31,4 +35,4 @@ XLight AutoSequencer analyzes audio files and produces timing data for xLights h
 - [Stem Affinity Rationale](stem-affinity-rationale.md) — Why algorithms prefer specific stems
 - [xLight Grouping Design](xlight-grouping-design.md) — Light group tier mapping
 - [Effect Themes Library](effect-themes-library.md) — Effect theme catalog
-- [Quickstart](quickstart.md) — Getting started guide
+- [CLI Analysis Reference](quickstart.md) — Advanced analysis and timing/value-curve exports

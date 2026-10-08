@@ -3,7 +3,7 @@
 #
 #   docker compose up
 #
-# Then open http://localhost:5000 . First run builds the image (compiles
+# Then open http://localhost:54321 . First run builds the image (compiles
 # the Vamp plugins from source — the slow, unattended step, easily 20-40
 # min) and installs the Python/JS packages; later runs are fast.
 #
@@ -24,7 +24,9 @@ services:
       context: .devcontainer
       dockerfile: Dockerfile
     ports:
-      - "5000:5000"
+      # Host port 54321 avoids the macOS system-service conflict on 5000.
+      # The app continues to listen on port 5000 inside the container.
+      - "54321:5000"
     environment:
       # Where the analyzer finds the vamp/madmom sidecar interpreter.
       # devcontainer.json sets this for the VS Code path; without it here,

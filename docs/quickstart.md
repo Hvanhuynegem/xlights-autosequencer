@@ -1,6 +1,13 @@
-# Quickstart: Analyzing a Song End-to-End
+# CLI Analysis Reference
 
-This guide walks through running a full analysis on an MP3 from scratch using the CLI.
+For the maintained getting-started walkthrough, use the
+[README Quick Start](../README.md#quick-start). It covers the complete path
+from importing a song to generating a package, extracting it, preparing
+an existing show folder, and rendering and previewing in xLights.
+
+The notes below cover advanced CLI analysis and timing/value-curve exports.
+They are not the web sequence-generation workflow and are not required
+for the README's Docker walkthrough.
 
 ---
 
