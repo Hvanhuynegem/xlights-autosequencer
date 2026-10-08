@@ -1,0 +1,32 @@
+{
+  "annotation_schema_version": 1,
+  "recording_id": "maple_leaf_rag",
+  "source_sha256": "fc7063803e8203dbecfce1396296dc4c78fbb82ca47b86ceb2df8e6b0c500f81",
+  "duration_ms": 179461,
+  "clock": "src.analyzer.audio.load; milliseconds from source start; unsnapped",
+  "review_status": "pending",
+  "reviewer": null,
+  "reviewed_on": null,
+  "scored_windows": [
+    {
+      "window_id": "opening",
+      "start_ms": 0,
+      "end_ms": 120000,
+      "review_status": "pending"
+    },
+    {
+      "window_id": "ending",
+      "start_ms": 149461,
+      "end_ms": 179461,
+      "review_status": "pending"
+    }
+  ],
+  "events": [],
+  "routine_patterns": [],
+  "negative_intervals": [],
+  "ignore_intervals": [],
+  "sections": [],
+  "notes": [
+    "No listening annotations yet. Empty events does not mean no highlights."
+  ]
+}

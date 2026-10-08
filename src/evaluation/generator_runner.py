@@ -8,10 +8,15 @@ from pathlib import Path
 from typing import Callable, Optional
 
 import numpy as np
+from src.highlights.models import HighlightState
 
 
 class GeneratorError(Exception):
     """Raised when the generator pipeline fails."""
+
+    def __init__(self, message: str, *, code: str | None = None):
+        super().__init__(message)
+        self.code = code
 
 
 def _derive_seed(audio_hash: str) -> int:
@@ -49,6 +54,8 @@ def run(
     story_path: Optional[Path | str] = None,
     progress_cb: Optional[Callable[[str, float], None]] = None,
     variation_seed: Optional[int] = None,
+    highlight_state: HighlightState | None = None,
+    highlight_reviewed_sections: list[dict] | None = None,
 ) -> bytes:
     """Run the generator deterministically and return .xsq bytes.
 
@@ -162,6 +169,10 @@ def run(
     np.random.seed(seed % (2**32))
 
     try:
+        highlight_kwargs = {}
+        if highlight_state is not None and highlight_state.enabled:
+            highlight_kwargs = {"highlight_state": highlight_state,
+                                "highlight_reviewed_sections": highlight_reviewed_sections}
         return _run_pipeline(audio_path, layout_path, seed, theme_overrides=theme_overrides,
                               section_overrides=section_overrides,
                               lyrics=lyrics, words=words, phonemes=phonemes,
@@ -176,11 +187,13 @@ def run(
                               title_override=title_override, artist_override=artist_override,
                               vocal_diarization=vocal_diarization,
                               story_path=Path(story_path) if story_path else None,
-                              progress_cb=progress_cb)
+                              progress_cb=progress_cb, **highlight_kwargs)
     except GeneratorError:
         raise
     except Exception as exc:
-        raise GeneratorError(f"Generator pipeline failed: {exc}") from exc
+        from src.generator.highlights import HighlightCompileError
+        code = exc.code if isinstance(exc, HighlightCompileError) else None
+        raise GeneratorError(f"Generator pipeline failed: {exc}", code=code) from exc
 
 
 def _run_pipeline(
@@ -207,6 +220,8 @@ def _run_pipeline(
     vocal_diarization: bool = False,
     story_path: Optional[Path] = None,
     progress_cb: Optional[Callable[[str, float], None]] = None,
+    highlight_state: HighlightState | None = None,
+    highlight_reviewed_sections: list[dict] | None = None,
 ) -> bytes:
     """Execute the full generation pipeline and return .xsq bytes."""
     from src.analyzer.orchestrator import run_orchestrator
@@ -219,6 +234,11 @@ def _run_pipeline(
     from src.grouper.layout import parse_layout
     from src.themes.library import load_theme_library
     from src.variants.library import load_variant_library
+
+    replay_files = {}
+    if highlight_state is not None and highlight_state.enabled:
+        from src.generator.highlight_context import file_digest
+        replay_files = {path: file_digest(path) for path in (audio_path, layout_path)}
 
     # Run analysis (uses cache when available)
     hierarchy = run_orchestrator(str(audio_path), fresh=False)
@@ -270,6 +290,8 @@ def _run_pipeline(
             moving_head_manual_triggers=moving_head_manual_triggers,
             title_override=title_override,
             artist_override=artist_override,
+            highlight_state=highlight_state,
+            highlight_reviewed_sections=highlight_reviewed_sections,
         )
 
         # Re-seed after config construction (which may trigger path resolution calls)
@@ -286,5 +308,8 @@ def _run_pipeline(
                   lyrics=lyrics, words=words, phonemes=phonemes,
                   include_extra_timing=include_extra_timing,
                   vocal_diarization=vocal_diarization)
+
+        if replay_files and any(file_digest(path) != digest for path, digest in replay_files.items()):
+            raise GeneratorError("Source or layout changed during highlight export; retry", code="generation_inputs_changed")
 
         return output_path.read_bytes()

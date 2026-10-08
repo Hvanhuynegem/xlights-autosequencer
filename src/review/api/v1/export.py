@@ -17,6 +17,8 @@ import time
 import zipfile
 from pathlib import Path
 from typing import Any
+from src.highlights.models import HighlightState
+from src.review.storage.highlights import load_highlights, HighlightStorageError
 
 from flask import Response, jsonify, request, send_file, stream_with_context
 
@@ -41,6 +43,7 @@ class _ExportState:
         self.events: list[dict] = []
         self.output_path: str | None = None
         self.variation_seed: int | None = None
+        self.highlight_layout_snapshot: tuple[str, bytes] | None = None
         self.lock = threading.Lock()
 
     def push(self, event: dict) -> None:
@@ -87,7 +90,8 @@ def _run_export(state: "_ExportState", song: dict, session: dict,
                 genre: str = "pop", occasion: str = "general",
                 include_extra_timing: bool = True,
                 vocal_diarization: bool = False,
-                variation_seed: int | None = None) -> None:
+                variation_seed: int | None = None,
+                highlight_state: HighlightState | None = None) -> None:
     """Run the export in a background thread."""
     try:
         state.push({"stage": "building_plan", "progress": 0.1})
@@ -95,7 +99,7 @@ def _run_export(state: "_ExportState", song: dict, session: dict,
         from src.evaluation.generator_runner import GeneratorError, run as run_generator
 
         source_paths = song.get("source_paths") or []
-        audio_path = source_paths[0] if source_paths else ""
+        audio_path = next((p for p in source_paths if Path(p).is_file()), "")
         layout_xml_path = layout.get("xml_path")
         if not layout_xml_path:
             # Do NOT fall through to generator_runner's global-settings fallback —
@@ -183,6 +187,15 @@ def _run_export(state: "_ExportState", song: dict, session: dict,
                 "detail": detail,
             })
 
+        highlight_kwargs = {}
+        highlight_files = {}
+        highlight_layout = None
+        if highlight_state is not None and highlight_state.enabled:
+            from src.generator.highlight_context import file_digest
+            highlight_files = {Path(p): file_digest(Path(p)) for p in (audio_path, layout_xml_path)}
+            highlight_layout = (Path(layout_xml_path).name, Path(layout_xml_path).read_bytes())
+            highlight_kwargs = {"highlight_state": highlight_state,
+                                "highlight_reviewed_sections": session.get("sections", [])}
         xsq_bytes = run_generator(
             song_id=song["song_id"],
             audio_path=audio_path,
@@ -209,7 +222,23 @@ def _run_export(state: "_ExportState", song: dict, session: dict,
             story_path=story_path,
             progress_cb=_placement_progress,
             variation_seed=variation_seed,
+            **highlight_kwargs,
         )
+
+        if highlight_kwargs:
+            if any(file_digest(path) != digest for path, digest in highlight_files.items()):
+                raise GeneratorError("Audio or layout changed during export; retry", code="generation_inputs_changed")
+            current = load_highlights(song["song_id"])
+            if current != highlight_state or load_session(song["song_id"]) != session:
+                raise GeneratorError("Highlight reviews or session changed during export; retry", code="generation_inputs_changed")
+            current_library = load_library()
+            current_song = next((s for s in current_library["songs"] if s["song_id"] == song["song_id"]), None)
+            current_prefs = current_library.get("preferences", {}) or {}
+            if (current_song is None or current_song.get("source_paths") != song.get("source_paths") or
+                    current_song.get("video_path") != song.get("video_path") or
+                    (current_prefs.get("genre") or "pop") != genre or
+                    (current_prefs.get("occasion") or "general") != occasion):
+                raise GeneratorError("Song inputs changed during export; retry", code="generation_inputs_changed")
 
         state.push({"stage": "writing_xsq", "progress": 0.9})
 
@@ -219,6 +248,7 @@ def _run_export(state: "_ExportState", song: dict, session: dict,
 
         with state.lock:
             state.output_path = output_path
+            state.highlight_layout_snapshot = highlight_layout
             state.status = "done"
 
         state.push({
@@ -230,7 +260,7 @@ def _run_export(state: "_ExportState", song: dict, session: dict,
     except GeneratorError as exc:
         with state.lock:
             state.status = "failed"
-        state.push({"stage": "failed", "error": str(exc)})
+        state.push({"stage": "failed", "error": str(exc), "code": exc.code})
     except Exception as exc:
         with state.lock:
             state.status = "failed"
@@ -269,8 +299,8 @@ def start_export(song_id: str):
 
     # Check source file
     source_paths = song.get("source_paths") or []
-    source_path = source_paths[0] if source_paths else ""
-    if source_path and not Path(source_path).exists():
+    source_path = next((p for p in source_paths if Path(p).is_file()), "")
+    if not source_path:
         return jsonify({"error": {"code": "source_file_missing",
                                    "message": "Audio source not found on disk"}}), 409
 
@@ -280,6 +310,23 @@ def start_export(song_id: str):
                                    "message": "No session data"}}), 409
 
     body = request.get_json(silent=True) or {}
+    if not isinstance(body, dict):
+        return jsonify({"error": {"code": "invalid_request", "message": "Expected a JSON object"}}), 400
+    highlights_choice = body.get("highlights")
+    if "highlights" in body and type(highlights_choice) is not bool:
+        return jsonify({"error": {"code": "invalid_highlights", "message": "highlights must be a boolean"}}), 400
+    highlight_state = None
+    if highlights_choice is not False:
+        try:
+            highlight_state = load_highlights(song_id)
+        except HighlightStorageError:
+            return jsonify({"error": {"code": "highlight_state_unreadable",
+                                       "message": "Saved highlights are unreadable; restore them or explicitly export with highlights: false"}}), 409
+        if highlight_state is not None and not highlight_state.enabled:
+            highlight_state = None
+        if highlights_choice is True and highlight_state is None:
+            return jsonify({"error": {"code": "highlights_unavailable",
+                                       "message": "No enabled accepted highlight plan is available"}}), 409
     fmt = body.get("format", "xsq")
     include_extra_timing = bool(body.get("include_extra_timing", True))
     # Default True per explicit user request (2026-07-21, see
@@ -321,6 +368,7 @@ def start_export(song_id: str):
         target=_run_export,
         args=(state, song, session, layout, destination_name, fmt, genre, occasion,
               include_extra_timing, vocal_diarization, variation_seed),
+        kwargs={"highlight_state": highlight_state} if highlight_state is not None else {},
         daemon=True,
     )
     t.start()
@@ -380,11 +428,11 @@ def download_export_package(song_id: str):
                                    "message": "Exported file is no longer available"}}), 404
 
     layout = get_committed_layout()
-    if layout is None:
+    if layout is None and state.highlight_layout_snapshot is None:
         return jsonify({"error": {"code": "layout_missing",
                                    "message": "layout/xlights_rgbeffects.xml is missing from the repo"}}), 409
 
-    rgbeffects_path = Path(layout["xml_path"])
+    rgbeffects_path = Path(layout["xml_path"]) if layout else None
     networks_path = get_committed_networks_xml_path()
 
     # .xsqz is xLights' own recognized extension for a zipped sequence
@@ -393,7 +441,11 @@ def download_export_package(song_id: str):
     package_path = xsq_path.with_suffix(".xsqz")
     with zipfile.ZipFile(package_path, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.write(xsq_path, arcname=xsq_path.name)
-        zf.write(rgbeffects_path, arcname=rgbeffects_path.name)
+        if state.highlight_layout_snapshot is not None:
+            name, content = state.highlight_layout_snapshot
+            zf.writestr(name, content)
+        else:
+            zf.write(rgbeffects_path, arcname=rgbeffects_path.name)
         if networks_path.exists():
             zf.write(networks_path, arcname=networks_path.name)
 

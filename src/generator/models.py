@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from src.themes.models import Theme
+from src.highlights.models import HighlightState, PlanContext
 
 
 MOOD_TIERS = {
@@ -147,12 +148,17 @@ class EffectPlacement:
     # None -> tier convention applies unchanged (every placement except the
     # snowflake Single Strand render-style rotation, as of 2026-07-24).
     buffer_style_override: str | None = None
+    # Producers with a non-default sequence clock opt in explicitly. Existing
+    # callers retain the original 25 ms rounding and minimum-duration behavior.
+    frame_interval_ms: int = FRAME_INTERVAL_MS
 
     def __post_init__(self) -> None:
-        self.start_ms = frame_align(self.start_ms)
-        self.end_ms = frame_align(self.end_ms)
+        if type(self.frame_interval_ms) is not int or self.frame_interval_ms <= 0:
+            raise ValueError("frame_interval_ms must be a positive integer")
+        self.start_ms = round(self.start_ms / self.frame_interval_ms) * self.frame_interval_ms
+        self.end_ms = round(self.end_ms / self.frame_interval_ms) * self.frame_interval_ms
         if self.end_ms <= self.start_ms:
-            self.end_ms = self.start_ms + FRAME_INTERVAL_MS
+            self.end_ms = self.start_ms + self.frame_interval_ms
 
 
 @dataclass
@@ -286,6 +292,10 @@ class SequencePlan:
     # build_plan() just before this SequencePlan is constructed. See
     # PlanWarning's docstring — informational only in V1.
     warnings: list[PlanWarning] = field(default_factory=list)
+    # Validated musical-highlight placements. Empty until a caller explicitly
+    # compiles and attaches a plan; appended to preserve positional callers.
+    highlight_effects: dict[str, list[EffectPlacement]] = field(default_factory=dict)
+    highlight_context: PlanContext | None = None
 
 
 @dataclass
@@ -479,6 +489,11 @@ class GenerationConfig:
     # result — written into the .xsq's <song>/<artist> Meta Data fields.
     title_override: Optional[str] = None
     artist_override: Optional[str] = None
+    # Explicit snapshot, never implicitly loaded by CLI/legacy callers. Disabled
+    # state leaves baseline generation unchanged and performs no extra hashing.
+    highlight_state: HighlightState | None = None
+    capture_highlight_context: bool = False
+    highlight_reviewed_sections: list[dict] | None = None
 
     _VALID_CURVES_MODES = frozenset({"all", "brightness", "speed", "color", "none"})
     _VALID_MOOD_INTENTS = frozenset({"auto", "party", "emotional", "dramatic", "playful"})

@@ -377,3 +377,66 @@ def test_variation_seed_override_reaches_generation_config(monkeypatch, tmp_path
     gr.run(song_id="s", audio_path=audio, audio_hash=_FAKE_HASH,
            layout_path=layout, variation_seed=999)
     assert captured["seed"] == 999
+
+
+def test_enabled_highlights_forward_through_run_and_preserve_error_code(tmp_path, monkeypatch):
+    from dataclasses import replace
+    from src.evaluation import generator_runner as runner
+    from src.generator.highlights import HighlightCompileError
+    from tests.fixtures.highlights.synthetic import build_fixture
+    fixture = build_fixture(tmp_path)
+    state = replace(fixture.state, accepted_plan=fixture.plan, enabled=True)
+    captured = {}
+    def pipeline(*args, **kwargs):
+        captured.update(kwargs)
+        raise HighlightCompileError('stale_plan', 'Input changed')
+    monkeypatch.setattr(runner, '_run_pipeline', pipeline)
+    with pytest.raises(runner.GeneratorError) as exc:
+        runner.run('abc', fixture.audio_path, 'abcd',
+                   layout_path=Path('tests/fixtures/reference/layout.xml'),
+                   highlight_state=state, highlight_reviewed_sections=[{'index': 0}])
+    assert captured['highlight_state'] == state
+    assert captured['highlight_reviewed_sections'] == [{'index': 0}]
+    assert exc.value.code == 'stale_plan'
+
+
+def test_replay_uses_actual_runner_config_build_plan_and_writer(tmp_path, monkeypatch):
+    """Detection and a quiet theme are controlled; the generation pipeline is real."""
+    import hashlib
+    from dataclasses import replace
+    import xml.etree.ElementTree as ET
+    from src.analyzer.result import HierarchyResult, TimingMark
+    from src.evaluation import generator_runner as runner
+    from src.generator.plan import build_plan as actual_build_plan
+    from tests.fixtures.highlights.synthetic import build_fixture
+    fixture = build_fixture(tmp_path / 'audio')
+    hierarchy = HierarchyResult('2.7.0', str(fixture.audio_path),
+                               hashlib.md5(fixture.audio_path.read_bytes()).hexdigest(), 16000, 120,
+                               sections=[TimingMark(time_ms=0, confidence=1, label='verse', duration_ms=16000)])
+    monkeypatch.setattr('src.analyzer.orchestrator.run_orchestrator', lambda *a, **k: hierarchy)
+    from src.themes.library import ThemeLibrary
+    from src.themes.models import Theme
+    quiet = Theme(name='Quiet', mood='structural', occasion='general', genre='any', intent='fixture',
+                  layers=[], palette=['#3366CC', '#FFAA00'])
+    monkeypatch.setattr('src.themes.library.load_theme_library', lambda **k: ThemeLibrary('1', {'Quiet': quiet}))
+    captured = {}
+    def capture(config, *args, **kwargs):
+        config.capture_highlight_context = True
+        plan = actual_build_plan(config, *args, **kwargs)
+        captured['plan'] = plan
+        return plan
+    monkeypatch.setattr('src.generator.plan.build_plan', capture)
+    kwargs = dict(song_id='abc', audio_path=fixture.audio_path, audio_hash='abcd',
+                  layout_path=Path('tests/fixtures/reference/layout.xml'))
+    baseline = runner.run(**kwargs)
+    saved = replace(fixture.plan, context=captured['plan'].highlight_context)
+    state = replace(fixture.state, accepted_plan=saved, enabled=True)
+    enhanced = runner.run(**kwargs, highlight_state=state)
+    assert enhanced != baseline
+    assert enhanced == runner.run(**kwargs, highlight_state=state)
+    root = ET.fromstring(enhanced)
+    effects = root.findall('./ElementEffects/Element[@name="MatrixCenter"]/EffectLayer/Effect')
+    assert [(p.get('startTime'), p.get('endTime')) for p in effects] == [('8275', '9725'), ('9725', '10125')]
+    with pytest.raises(runner.GeneratorError) as exc:
+        runner.run(**kwargs, highlight_state=state, variation_seed=99)
+    assert exc.value.code == 'stale_plan'

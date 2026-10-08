@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "sample_rate": 22050,
+  "duration_ms": 16000,
+  "noise_seed": 20261008,
+  "stems_available": [],
+  "cases": {
+    "sweep_impact": {
+      "description": "Regular rhythm, off-beat noise sweep, separate impact, then rhythm and quiet tail",
+      "events": [
+        {"event_id": "sweep-1", "kind": "sweep", "start_ms": 8273, "peak_ms": 9719, "end_ms": 10113, "recipe_id": "sustained_wash", "target": "MatrixCenter", "end_offset_ms": 0},
+        {"event_id": "impact-1", "kind": "impact", "start_ms": 10500, "peak_ms": null, "end_ms": 10500, "recipe_id": "isolated_impact", "target": "RadialSpinner", "end_offset_ms": 250}
+      ]
+    },
+    "near_end": {
+      "description": "A final off-beat impact whose treatment ends exactly at the recording boundary",
+      "events": [
+        {"event_id": "final-impact", "kind": "impact", "start_ms": 15751, "peak_ms": null, "end_ms": 15751, "recipe_id": "isolated_impact", "target": "RadialSpinner", "end_offset_ms": 249}
+      ]
+    },
+    "rhythm_only": {
+      "description": "Ordinary alternating kick/snare rhythm and a quiet tail; no annotated exceptional events",
+      "events": []
+    }
+  }
+}

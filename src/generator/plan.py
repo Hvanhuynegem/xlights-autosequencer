@@ -160,6 +160,13 @@ def build_plan(
     5. Generate value curves
     6. Assemble SequencePlan
     """
+    highlight_state = config.highlight_state
+    highlight_requested = config.capture_highlight_context or (highlight_state is not None and highlight_state.enabled)
+    highlight_source = None
+    if highlight_requested:
+        from src.generator.highlight_context import capture_source
+        highlight_source = capture_source(config, hierarchy)
+
     # 1. Song profile
     profile = read_song_metadata(config.audio_path, hierarchy)
     profile.genre = config.genre
@@ -679,7 +686,7 @@ def build_plan(
         logger.warning("[%s] %s", warning.code, warning.message)
 
     # 8. Assemble plan
-    return SequencePlan(
+    result = SequencePlan(
         song_profile=profile,
         sections=assignments,
         layout_groups=groups,
@@ -693,6 +700,21 @@ def build_plan(
         shadow_text_effects=shadow_text_effects,
         moving_head_effects=moving_head_effects,
     )
+    if highlight_requested:
+        from src.generator.highlight_context import build_context
+        from src.generator.highlights import compile_highlights, HighlightCompileError
+        context = build_context(config, hierarchy, result, layout, effect_library, theme_library,
+                                source=highlight_source, story=story)
+        result.highlight_context = context
+        if highlight_state is not None and highlight_state.enabled:
+            if (highlight_state.source_sha256 != context.source_sha256 or
+                    highlight_state.duration_ms != context.duration_ms):
+                raise HighlightCompileError("source_changed", "Saved highlights do not match current audio")
+            result.highlight_effects = compile_highlights(
+                result, highlight_state.accepted_plan, context=context, events=highlight_state.events,
+                layout=layout, effect_library=effect_library,
+            )
+    return result
 
 
 # The end-of-song fade always fires and spans at least this long: when the

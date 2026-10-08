@@ -1,0 +1,141 @@
+{
+  "benchmark_schema_version": 1,
+  "benchmark_revision": "2026-10-08-v1",
+  "status": "awaiting_listening_annotations_and_additional_recordings",
+  "split_assigned_before_highlight_tuning": true,
+  "holdout_scope": "New highlights feature only; these tracks already belong to the repository regression corpus.",
+  "clock": {
+    "loader": "src.analyzer.audio.load",
+    "units": "integer milliseconds from recording start",
+    "rounding": "floor decoded sample count / sample rate * 1000",
+    "dependencies": {
+      "librosa": "0.11.0",
+      "soundfile": "0.14.0",
+      "numpy": "1.26.4"
+    }
+  },
+  "recordings": [
+    {
+      "recording_id": "funshine",
+      "split": "development",
+      "audio_path": "tests/fixtures/cc0_music/funshine.mp3",
+      "source_sha256": "b98b226927367a977377fe4f75d1cf59e4366ca2f444c2c7d23d13e7f506f532",
+      "source_md5": "9c8715a5f9fca611eec6fad8070f5bd8",
+      "source_url": "https://raw.githubusercontent.com/SoundSafari/CC0-1.0-Music/main/freepd.com/Funshine.mp3",
+      "declared_license": "CC0",
+      "license_source": "tests/fixtures/cc0_music/manifest.json",
+      "decoded_duration_ms": 165067,
+      "decoded_samples": 7279488,
+      "sample_rate_hz": 44100,
+      "container_duration_ms": 165068,
+      "source_bytes": 6756665,
+      "intended_coverage_unverified": [
+        "rhythmic_full_mix",
+        "ordinary_beat_negatives",
+        "possible_transitions"
+      ],
+      "annotation_path": "tests/fixtures/highlights/annotations/funshine.json",
+      "annotation_status": "pending"
+    },
+    {
+      "recording_id": "maple_leaf_rag",
+      "split": "development",
+      "audio_path": "tests/fixtures/cc0_music/maple_leaf_rag.mp3",
+      "source_sha256": "fc7063803e8203dbecfce1396296dc4c78fbb82ca47b86ceb2df8e6b0c500f81",
+      "source_md5": "cc2abf24c157fd38918e3c047d29a346",
+      "source_url": "https://raw.githubusercontent.com/SoundSafari/CC0-1.0-Music/main/freepd.com/Maple%20Leaf%20Rag.mp3",
+      "declared_license": "CC0",
+      "license_source": "tests/fixtures/cc0_music/manifest.json",
+      "decoded_duration_ms": 179461,
+      "decoded_samples": 7914240,
+      "sample_rate_hz": 44100,
+      "container_duration_ms": 179461,
+      "source_bytes": 7313167,
+      "intended_coverage_unverified": [
+        "repeated_instrumental_material",
+        "melodic_phrases"
+      ],
+      "annotation_path": "tests/fixtures/highlights/annotations/maple_leaf_rag.json",
+      "annotation_status": "pending"
+    },
+    {
+      "recording_id": "nostalgic_piano",
+      "split": "holdout",
+      "audio_path": "tests/fixtures/cc0_music/nostalgic_piano.mp3",
+      "source_sha256": "5d932737a07dc1f0fadc713d188a059964bc156371e1569f5a6267dc39547865",
+      "source_md5": "c7be31e80970799e3c7e07660901575b",
+      "source_url": "https://raw.githubusercontent.com/SoundSafari/CC0-1.0-Music/main/freepd.com/Nostalgic%20Piano.mp3",
+      "declared_license": "CC0",
+      "license_source": "tests/fixtures/cc0_music/manifest.json",
+      "decoded_duration_ms": 196317,
+      "decoded_samples": 8657586,
+      "sample_rate_hz": 44100,
+      "container_duration_ms": 196336,
+      "source_bytes": 7853453,
+      "intended_coverage_unverified": [
+        "quiet_changes",
+        "melodic_phrases",
+        "restraint"
+      ],
+      "annotation_path": "tests/fixtures/highlights/annotations/nostalgic_piano.json",
+      "annotation_status": "pending"
+    },
+    {
+      "recording_id": "space_ambience",
+      "split": "holdout",
+      "audio_path": "tests/fixtures/cc0_music/space_ambience.mp3",
+      "source_sha256": "7b65926a73b259da8b3111791fac037f956d3c0ace379b076a1bbf780a049828",
+      "source_md5": "e6c7d58626089af7825f77da784ad254",
+      "source_url": "https://raw.githubusercontent.com/SoundSafari/CC0-1.0-Music/main/freepd.com/Space%20Ambience.mp3",
+      "declared_license": "CC0",
+      "license_source": "tests/fixtures/cc0_music/manifest.json",
+      "decoded_duration_ms": 275678,
+      "decoded_samples": 12157411,
+      "sample_rate_hz": 44100,
+      "container_duration_ms": 275678,
+      "source_bytes": 11173312,
+      "intended_coverage_unverified": [
+        "sustained_texture",
+        "sparse_events"
+      ],
+      "annotation_path": "tests/fixtures/highlights/annotations/space_ambience.json",
+      "annotation_status": "pending"
+    }
+  ],
+  "reserved_recordings": [
+    {
+      "recording_id": "user_motivating_example",
+      "split": "development",
+      "audio_path": null,
+      "source_sha256": null,
+      "required_coverage": [
+        "unusual_shhh",
+        "surrounding_regular_rhythm"
+      ],
+      "status": "awaiting_recording_and_timestamp"
+    },
+    {
+      "recording_id": "independent_rhythmic_example",
+      "split": "holdout",
+      "audio_path": null,
+      "source_sha256": null,
+      "required_coverage": [
+        "dense_percussion",
+        "fill_or_crash",
+        "repeated_chorus_if_present"
+      ],
+      "status": "awaiting_recording_and_listening"
+    }
+  ],
+  "readiness": {
+    "real_recording_target_min": 6,
+    "available_verified_recordings": 4,
+    "reviewed_recordings": 0,
+    "final_evaluation_min_holdout_recordings": 3,
+    "final_evaluation_min_important_holdout_events": 20,
+    "notes": [
+      "Add another independent holdout recording before final quality claims.",
+      "Synthetic controls are separate from the real-recording count."
+    ]
+  }
+}

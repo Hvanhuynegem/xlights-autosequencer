@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI Highlights — foundation and manual sequence design</title>
+  <link rel="stylesheet" href="../_design.css">
+</head>
+<body>
+<div class="layout">
+<nav class="toc" aria-label="Design sections">
+  <h2>Design</h2>
+  <ol>
+    <li><a href="#goal">Goal and scope</a></li>
+    <li><a href="#contracts">Contracts</a></li>
+    <li><a href="#storage">Persistence and APIs</a></li>
+    <li><a href="#compiler">Compilation</a></li>
+    <li><a href="#files">Files and callers</a></li>
+    <li><a href="#history">Historical evidence</a></li>
+    <li><a href="#validation">Validation and risks</a></li>
+  </ol>
+</nav>
+<main>
+<header class="doc-header" id="goal">
+  <p class="kicker">Design proposal · 2026-10-08 · foundation implemented; integration pending</p>
+  <h1>Make an exceptional sound visible</h1>
+  <div class="goal">Save a precisely timed manual musical event and compile a supported lighting treatment through the real xLights export path, with persistent intent and reproducible replay.</div>
+  <p>First slice of <a href="../../../AI_HIGHLIGHTS_ROADMAP.md">AI Highlights</a>. Existing software remains the baseline. This proposal supplies contracts and manual generation before automatic detection or API-backed direction. Typed records, sidecar storage, synthetic fixtures, and the manual-event API are implemented. Two initial recipes compile through XSQ serialization; live generation context and enabled-state export are also implemented. Public plan acceptance, preview integration, and visual acceptance remain pending. See <a href="live-context.md">the live replay detail</a>. See <a href="compiler.md">the compiler detail</a>. See <a href="manual-api.md">the manual endpoint contract</a>.</p>
+  <p>Read the <a href="proposal.md">proposal and alternatives</a>, <a href="tasks.md">task checklist</a>, <a href="callers.md">caller inventory</a>, and <a href="../../../docs/ai-highlights/baseline-2026-10-08.md">measured native baseline</a>.</p>
+</header>
+
+<section class="block" id="contracts">
+  <h2>Contracts and identity</h2>
+  <p>Add a small <code>src/highlights/</code> package using the project's existing Python/dataclass conventions. Validation must reject booleans masquerading as timestamps, nonfinite values, unknown enum values, malformed identifiers, and times outside the recording. Do not add a provider dependency to these records.</p>
+  <table>
+    <thead><tr><th>Record</th><th>Proposed contents and invariants</th></tr></thead>
+    <tbody>
+      <tr><td>MusicalEvent</td><td>Stable event ID; source SHA-256; source revision; event type; start, optional measured peak, and end; timing/evidence provenance; separate detection and salience scores. Manual events may lack detector scores. A point event may have equal times; sustained events require positive duration.</td></tr>
+      <tr><td>EventReview</td><td>Accepted/dismissed state, manual timing/importance overrides, locks, and revision. Preserve original measured data. Manual IDs remain stable on edits; automatic IDs later have explicit revision scope.</td></tr>
+      <tr><td>HighlightTreatment</td><td>Referenced event, allowed recipe ID/version, eligible target selection, bounded intensity, palette source, and bounded event-relative offsets. No arbitrary XML, executable code, filesystem paths, or user-provided effect parameters.</td></tr>
+      <tr><td>AcceptedHighlightPlan</td><td>Schema/recipe versions, plan ID/revision, immutable event snapshots, treatments, input fingerprints, source provenance, and status. No provider credentials. Accepted output references the exact reviewed event revision.</td></tr>
+      <tr><td>ValidationResult</td><td>Machine-readable issues with event/treatment IDs and severity. Invalid required operations reject the proposal as a whole. No partial mutation of a valid accepted snapshot.</td></tr>
+    </tbody>
+  </table>
+  <p>Keep manual state independent of <code>HierarchyResult</code> in this slice. P2 will design the detector-to-event adapter and any hierarchy schema extension, including cache-version invalidation. Old hierarchies remain usable for baseline/manual operation; absent automatic events mean unavailable evidence, not a claim that a song has none.</p>
+  <p>The current UI identifies Funshine as <code>b98b226927367a97</code>, while its hierarchy uses an MD5 content hash. Use explicit SHA-256/MD5 field names and verify source bytes; never interpret a shortened song ID as the hierarchy hash.</p>
+  <p>Fingerprint the source audio, normalized reviewed sections, effective theme/slider choices, resolved layout membership, recipe/effect catalog contents, baseline configuration, and variation seed. Ignore presentation-only metadata where it has no generation effect. Changes to generation-relevant inputs make the accepted snapshot stale. A schema version alone is insufficient cache identity.</p>
+</section>
+
+<section class="block" id="storage">
+  <h2>Persistence and manual APIs</h2>
+  <p>Use <code>&lt;state-home&gt;/library/songs/&lt;song-id&gt;/highlights.json</code>, resolved through existing state path helpers. The sidecar contains a schema version, monotonically increasing revision, reviewed events, draft plan, accepted plan, and prior accepted revision needed for undo. Keep the history bounded. Missing file means highlights disabled; corrupt/unsupported data produces an explicit recoverable error.</p>
+  <p>This choice avoids losing state when <code>analysis._analyze_in_background</code> or <code>commit_analyze</code> replaces the ordinary session JSON. It introduces an explicit backup obligation: current session-only bundles will not capture this file. Portable bundle support remains a required P1.3/P7.4 task before a release; do not advertise backup completeness in the first internal slice.</p>
+  <table>
+    <thead><tr><th>Proposed route</th><th>Behavior</th></tr></thead>
+    <tbody>
+      <tr><td><code>GET /api/v1/songs/&lt;id&gt;/highlights</code></td><td>Return current sidecar revision, reviewed events, draft/accepted plan metadata, and computed validity/staleness. Unknown song: 404. Missing sidecar: empty disabled state.</td></tr>
+      <tr><td><code>PUT /api/v1/songs/&lt;id&gt;/highlights</code></td><td>Accept <code>expected_revision</code> plus explicitly typed edits/plan acceptance. Validate against the song's current source, context, and catalogs. Revision mismatch: 409. Invalid contract: 400. Invalid references/stale context: 409 or 422 with an actionable issue code.</td></tr>
+    </tbody>
+  </table>
+  <p>Snapshot input context before validation, then compare it again at commit. Use an in-process per-song lock plus atomic file replacement for the supported single-backend-per-state-directory deployment. Tests must prove one winner for competing same-revision requests. This is not a cross-process locking guarantee; multiple backend processes sharing one state directory require a separate locking design.</p>
+  <p>Reanalysis preserves manual events. Existing accepted snapshots become stale when their source/structure/configuration fingerprints differ. Automatic ID remapping is deferred; never silently attach an existing review to a different detected sound.</p>
+</section>
+
+<section class="block" id="compiler">
+  <h2>Compilation through the actual export path</h2>
+  <ol>
+    <li>The export endpoint loads and snapshots accepted highlight state alongside the ordinary session. Explicit disabled mode uses the baseline.</li>
+    <li>Add optional parameters at the end of <code>generator_runner.run</code> and its private pipeline helper. Pass the snapshot into new defaulted <code>GenerationConfig</code> fields.</li>
+    <li>Build the existing baseline with current seed, theme selection, ordinary accents, curves, transitions, and start/end fades.</li>
+    <li>Assemble the baseline <code>SequencePlan</code>. Validate the entire highlight snapshot against current inputs before applying it.</li>
+    <li>Compile into a dedicated default-empty <code>SequencePlan.highlight_effects</code> collection, using ordinary <code>EffectPlacement</code> records. First-slice recipes do not mutate background placements.</li>
+    <li>The writer includes this collection in its normal placement gathering. Do not rely on the writer's overlap trimming to decide musical conflicts.</li>
+    <li>Export/package as before. Surface stale/invalid accepted plans explicitly; preserve the prior accepted state and require an explicit baseline export choice rather than silently claiming enhanced output.</li>
+  </ol>
+  <p>Initial recipes: <strong>sustained wash/sweep</strong> (an envelope-following wash or verified spatial sweep) and <strong>isolated impact</strong> (a short valid pulse/impact using real catalog definitions). First validate the chosen effect's actual parameter names, target suitability, buffer style, and rendering behavior. Require a measured/manual peak for a peak-anchored recipe; do not invent one for an imported point mark.</p>
+  <p>Resolve existing eligible groups/props; do not create dangling group names. Inherit the reviewed theme palette. Avoid imported-video targets, singing faces, and other protected active content. Compare underlying physical memberships, not just group names. If every eligible target conflicts, return a useful rejection instead of silently placing an invisible treatment.</p>
+  <p>Source event timing remains unchanged. Resolve event-relative anchors, bound to the recording, then quantize to the plan's frame interval using one documented rounding policy. Reject a recipe if clamping/rounding leaves insufficient duration. The current default is 25 ms; do not hardcode it into event data. Record resolved placement times for debugging.</p>
+  <p>Reserve layers in front of relevant existing content only where the target's compositing rules permit it. Code history records that lower indices render in front; actual xLights output must confirm this. Avoid start/end fade regions in the initial slice. Controlled background dimming, its restoration, and richer conflict arbitration belong to P4.3 and must be designed before activation.</p>
+  <p>Section preview currently constructs a new scoped plan and primarily reads section effects. Forward scoped highlight effects and include accepted-plan identity in preview cache inputs; otherwise an export can contain a highlight that preview silently omits. Preserve other preview behavior in this focused change.</p>
+</section>
+
+<section class="block" id="files">
+  <h2>Files and regression surface</h2>
+  <p>The linked <a href="callers.md">inventory</a> records current direct calls under <code>src/</code> and <code>tests/</code>. Re-run the search at implementation time. Defaulted fields and appended keyword parameters keep baseline callers compatible, but behavioral checks remain required.</p>
+  <table>
+    <thead><tr><th>File</th><th>Planned action</th><th>Caller/compatibility treatment</th></tr></thead>
+    <tbody>
+      <tr><td><code>src/highlights/__init__.py</code>, <code>models.py</code>, <code>validation.py</code></td><td>Add typed records and validation.</td><td>New APIs; only the new storage, route, and compiler callers initially.</td></tr>
+      <tr><td><code>src/review/storage/highlights.py</code></td><td>Add sidecar storage/revision checks.</td><td>Use existing state paths; leave ordinary session save/load signatures unchanged.</td></tr>
+      <tr><td><code>src/review/api/v1/highlights.py</code>, <code>__init__.py</code></td><td>Add/register manual endpoints.</td><td>New routes; validate input and song identity; avoid global-state leakage in tests.</td></tr>
+      <tr><td><code>src/generator/highlights.py</code></td><td>Add recipe compiler and eligibility checks.</td><td>New internal caller from build_plan; do not modify existing detector thresholds or recipe selection.</td></tr>
+      <tr><td><code>src/generator/models.py</code></td><td>Add optional GenerationConfig snapshot/enabled fields and default-empty SequencePlan.highlight_effects.</td><td>All constructor call sites in inventory keep baseline defaults. No required positional parameters added.</td></tr>
+      <tr><td><code>src/generator/plan.py</code></td><td>Compile after baseline assembly when enabled.</td><td>build_plan signature stays unchanged; direct generation, runner, preview, and integration tests are covered.</td></tr>
+      <tr><td><code>src/generator/xsq_writer.py</code></td><td>Gather highlight placements with existing collections.</td><td>write_xsq signature stays unchanged; old plans serialize identically when collection is empty.</td></tr>
+      <tr><td><code>src/evaluation/generator_runner.py</code></td><td>Append optional run/pipeline snapshot parameters and pass into config.</td><td>Review export supplies them. Compare/evaluate and tests retain defaults; test stubs must accept new kwargs where used.</td></tr>
+      <tr><td><code>src/review/api/v1/export.py</code></td><td>Load accepted sidecar snapshot and pass it to the runner; expose explicit stale/invalid-plan outcome.</td><td>Existing export route stays supported; enabled-plan behavior is additive. Save-bundle inclusion remains deferred and documented.</td></tr>
+      <tr><td><code>src/generator/preview.py</code>, <code>src/review/preview_routes.py</code></td><td>Preserve scoped highlight effects and invalidate preview on accepted-plan change.</td><td>Current section-preview tests retain their baseline outputs. No new unrelated preview features.</td></tr>
+      <tr><td><code>tests/unit/test_highlight_models.py</code>, <code>tests/unit/test_generator/test_highlights.py</code>, <code>tests/review_storage/test_highlights.py</code>, <code>tests/review/test_api_highlights.py</code></td><td>Add focused contract, storage, placement, and route tests.</td><td>Isolated state, fake audio fixtures; no live provider calls.</td></tr>
+      <tr><td><code>tests/evaluation/test_generator_runner.py</code>, <code>tests/review/test_api_export.py</code>, <code>tests/unit/test_generator/test_xsq_writer.py</code>, <code>tests/integration/test_generator_equivalence.py</code>, <code>tests/integration/test_section_preview.py</code></td><td>Extend integration/no-op coverage as needed.</td><td>Prove real kwargs and fields traverse the shipped path, not only a standalone compiler helper.</td></tr>
+    </tbody>
+  </table>
+  <p>CLI/wizard and legacy generation routes retain default-disabled behavior in this slice. Do not advertise editable highlights in those callers until P7.4 wires them explicitly. Full backup portability, automatic events, and the React editing controls remain tracked follow-ups rather than implicit behavior.</p>
+</section>
+
+<section class="block" id="history">
+  <h2>Historical evidence</h2>
+  <p>The required <code>.wolf/</code> files were absent on 2026-10-08. The following evidence was available in source comments and existing proposals; it is historical context, not a new reproduction.</p>
+  <table>
+    <thead><tr><th>History</th><th>Evidence</th><th>Design response</th></tr></thead>
+    <tbody>
+      <tr><td>bug-265: stale caches omit new detector fields</td><td><a href="../crash-stem-impact-score/proposal.md">Crash proposal</a></td><td>Separate absent evidence from no events. When automatic fields are added, update cache reuse/version logic explicitly.</td></tr>
+      <tr><td>bug-266: earlier peaks suppress the wanted crash; results depend on the audio rip</td><td><a href="../../../src/analyzer/crash_accents.py">Detector history</a></td><td>Pin exact source hashes, annotate first, score before selection, and reserve holdout recordings.</td></tr>
+      <tr><td>Truncated stem cache led to incorrect crash-count assumptions</td><td><a href="../../../src/analyzer/crash_accents.py">Detector history</a></td><td>Record source duration and validate stem coverage. Do not impose an arbitrary fixed highlight count per song.</td></tr>
+      <tr><td>bug-248 and bug-569: layer direction mistaken</td><td><a href="../../../src/generator/models.py">EffectPlacement.layer</a></td><td>Check actual layer serialization and real render visibility; lower indices are currently documented as frontmost.</td></tr>
+      <tr><td>Fill accents collided with moving-head warmups; bug-514 target rotation context</td><td><a href="../../../src/analyzer/riff_bursts.py">Fill history</a> and <a href="../../../CLAUDE.md">development notes</a></td><td>Limit initial target eligibility, account for occupied physical props, and keep no-target reasons visible.</td></tr>
+      <tr><td>Session saves previously discarded extra fields</td><td><a href="../../../src/review/storage/assignments.py">save_session preservation comment</a></td><td>Use independent highlight storage now; explicitly test reanalysis and later bundle handling.</td></tr>
+      <tr><td>Historical export signature mismatch generated a stub</td><td><a href="../../../docs/known-broken-tests.md">Known test history</a></td><td>Verify endpoint → runner → writer with no stubs, and inspect the downloaded package.</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section class="block" id="validation">
+  <h2>Validation and pre-mortem</h2>
+  <p>This is a direct design review; no unavailable pre-mortem skill or agent review is claimed.</p>
+  <ul>
+    <li><strong>Hidden assumption: a point mark has a meaningful peak/end.</strong> Require timing evidence for sustained recipes; permit missing measurements rather than fabricating them.</li>
+    <li><strong>Hidden assumption: a visible event is necessarily important.</strong> Preserve listener importance separately from detection scores and compare against routine-pattern negatives.</li>
+    <li><strong>Hidden assumption: app IDs are audio hashes of the same kind.</strong> Verify actual bytes and distinguish SHA-256, shortened song IDs, and hierarchy MD5 explicitly.</li>
+    <li><strong>Hidden assumption: a group name is a unique physical region.</strong> Resolve member overlap and protected content before target selection.</li>
+    <li><strong>Hidden assumption: the preview displays everything the writer exports.</strong> Thread and scope the new song-level collection through preview and its cache.</li>
+    <li><strong>Test gap: native baseline lacks several analyzers.</strong> Keep capability-specific baseline results and require a deployment/render check before declaring the first slice complete.</li>
+    <li><strong>Test gap: sidecar state is absent from current bundles.</strong> Keep backup support visibly pending and test it in P1.3/P7.4 before release.</li>
+    <li><strong>Recovery risk: accepted plan becomes invalid after settings change.</strong> Compute staleness from current context and reject enhanced export explicitly; never silently discard user choices.</li>
+  </ul>
+  <p>Tests should cover strict data types, unsupported versions, save/reload, old/no-highlight songs, revision races, no eligible targets, source mismatch, out-of-bounds/off-beat timing, layer order, end-fade conflicts, empty-plan no-op, repeated export equality, preview inclusion, and endpoint forwarding. Use repository state-isolation conventions. Run the applicable existing generator/API/storage checks, then a real xLights render for the manual event.</p>
+  <p><strong>Verdict:</strong> the user requested continuation after design preparation. Contracts, sidecar storage, fixtures, and manual-event routes are tested; two initial recipes and XSQ serialization are tested. Live context and enabled-state export are tested. Public acceptance, preview integration and visual acceptance are pending. The proposed first slice removes the dependency on model access while providing the records and compiler path needed for later detection and AI direction.</p>
+</section>
+</main>
+</div>
+</body>
+</html>

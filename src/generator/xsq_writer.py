@@ -10,7 +10,7 @@ from pathlib import Path
 from src.analyzer.result import HierarchyResult, TimingMark, TimingTrack
 from src.generator.effect_placer import _WHOLE_HOUSE_HIGH_ENERGY_GATE, _WHOLE_HOUSE_LOW_ENERGY_GATE
 from src.generator.image_catalog import load_image_library
-from src.generator.models import EffectPlacement, SequencePlan, XsqDocument, FRAME_INTERVAL_MS
+from src.generator.models import EffectPlacement, SequencePlan, XsqDocument
 
 logger = logging.getLogger(__name__)
 
@@ -422,9 +422,9 @@ def write_xsq(
     """Write a SequencePlan as a valid xLights .xsq XML file.
 
     Follows the xLights 2024+ schema:
-    - FixedPointTiming="25" (40fps)
+    - FixedPointTiming follows the plan's frame interval (default 25 ms / 40fps)
     - Deduplicates EffectDB entries and ColorPalettes
-    - Frame-aligns all times to 25ms multiples
+    - Preserves placement timing; producers align to the plan's frame interval
     - Model names from DisplayElements match layout
 
     Optional kwargs for section preview (spec 049):
@@ -459,6 +459,9 @@ def write_xsq(
       time span contains them. Degrades to the original single-track
       behavior when off, or when no speaker-1 words are present.
     """
+    if type(plan.frame_interval_ms) is not int or plan.frame_interval_ms <= 0:
+        raise ValueError("frame_interval_ms must be a positive integer")
+
     # Warn if audio is outside the mounted show directory (devcontainer-specific).
     # The XSQ will still be written, but xLights on the host won't find the audio.
     if audio_path is not None:
@@ -498,6 +501,11 @@ def write_xsq(
     # Song-scoped rare crash/transient accents (Shockwave on
     # 01_BASE_All_FADES) — same rationale as vocal_effects.
     for group_name, placements in plan.crash_effects.items():
+        unordered.setdefault(group_name, []).extend(placements)
+
+    # Validated manual/AI highlight recipes use ordinary placements and layers.
+    # Empty by default so baseline serialization remains unchanged.
+    for group_name, placements in plan.highlight_effects.items():
         unordered.setdefault(group_name, []).extend(placements)
 
     # Song-scoped Pictures placements (image library entries cycling on
@@ -720,7 +728,7 @@ def write_xsq(
     root.set("BaseChannel", "0")
     root.set("ChanCtrlBasic", "0")
     root.set("ChanCtrlColor", "0")
-    root.set("FixedPointTiming", str(FRAME_INTERVAL_MS))
+    root.set("FixedPointTiming", str(plan.frame_interval_ms))
     root.set("ModelBlending", "true")
 
     # <head>
@@ -742,7 +750,7 @@ def write_xsq(
     else:
         ET.SubElement(head, "mediaFile").text = plan.song_profile.title + ".mp3"
     ET.SubElement(head, "sequenceType").text = "Media"
-    ET.SubElement(head, "sequenceTiming").text = f"{FRAME_INTERVAL_MS} ms"
+    ET.SubElement(head, "sequenceTiming").text = f"{plan.frame_interval_ms} ms"
     # Use scoped_duration_ms when provided (spec 049: section preview window).
     # Fall back to the full song duration for normal renders.
     effective_duration_ms = scoped_duration_ms if scoped_duration_ms is not None else plan.song_profile.duration_ms
