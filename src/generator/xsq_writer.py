@@ -888,6 +888,15 @@ def write_xsq(
             if group_buffer_style is not None:
                 layer_el.set("settings", f"B_CHOICE_BufferStyle={group_buffer_style}")
             for p in sorted(layers_map[layer_idx], key=lambda p: p.start_ms):
+                # Scoped previews serialize only the intersection with their
+                # local clock; leave the full-song placements untouched.
+                offset = audio_offset_ms if audio_offset_ms is not None else 0
+                start_ms, end_ms = p.start_ms - offset, p.end_ms - offset
+                if scoped_duration_ms is not None:
+                    start_ms = max(0, start_ms)
+                    end_ms = min(scoped_duration_ms, end_ms)
+                    if end_ms <= start_ms:
+                        continue
                 effect_el = ET.SubElement(layer_el, "Effect")
 
                 ref_idx, palette_idx = placement_cache.get(id(p), (0, 0))
@@ -896,9 +905,8 @@ def write_xsq(
                 effect_el.set("name", p.effect_name)
                 # Apply audio offset shift for section preview (spec 049).
                 # We do NOT mutate the EffectPlacement — shift is serialization-only.
-                offset = audio_offset_ms if audio_offset_ms is not None else 0
-                effect_el.set("startTime", str(p.start_ms - offset))
-                effect_el.set("endTime", str(p.end_ms - offset))
+                effect_el.set("startTime", str(start_ms))
+                effect_el.set("endTime", str(end_ms))
                 effect_el.set("palette", str(palette_idx))
                 effect_el.set("selected", "0")
 
@@ -910,7 +918,7 @@ def write_xsq(
         timing_el.set("name", track_name)
 
         layer_el = ET.SubElement(timing_el, "EffectLayer")
-        _emit_timing_layer(layer_el, marks, offset, int(plan.song_profile.duration_ms))
+        _emit_timing_layer(layer_el, marks, offset, int(plan.song_profile.duration_ms), scoped_duration_ms)
 
     # Multi-layer "Lyrics" track (phrases / words / phonemes) — see above.
     if lyric_layers:
@@ -920,7 +928,7 @@ def write_xsq(
         for layer_marks in lyric_layers:
             layer_el = ET.SubElement(timing_el, "EffectLayer")
             _emit_timing_layer(layer_el, layer_marks, offset,
-                               int(plan.song_profile.duration_ms))
+                               int(plan.song_profile.duration_ms), scoped_duration_ms)
 
     # Second "Lyrics - Backup" track for a diarized featured/backup singer.
     if backup_lyric_layers:
@@ -930,7 +938,7 @@ def write_xsq(
         for layer_marks in backup_lyric_layers:
             layer_el = ET.SubElement(timing_el, "EffectLayer")
             _emit_timing_layer(layer_el, layer_marks, offset,
-                               int(plan.song_profile.duration_ms))
+                               int(plan.song_profile.duration_ms), scoped_duration_ms)
 
     # Write to file
     tree = ET.ElementTree(root)
@@ -1640,6 +1648,7 @@ def _emit_timing_layer(
     marks: list[TimingMark],
     offset: int,
     song_duration_ms: int,
+    scoped_duration_ms: int | None = None,
 ) -> None:
     """Write one timing EffectLayer's <Effect> children from marks.
 
@@ -1658,6 +1667,9 @@ def _emit_timing_layer(
         # Apply audio offset shift for section preview (serialization-only)
         start = raw_start - offset
         end = raw_end - offset
+        if scoped_duration_ms is not None:
+            start = max(0, start)
+            end = min(scoped_duration_ms, end)
         if end <= start:
             continue
         effect_el = ET.SubElement(layer_el, "Effect")

@@ -205,7 +205,7 @@ def test_api_preserves_accepted_and_draft_plans_but_never_claims_validity(client
     assert data['state']['draft_plan'] == saved.draft_plan.to_dict()
     assert data['state']['previous_accepted_plan'] == saved.previous_accepted_plan.to_dict()
     assert data['state']['enabled'] is False
-    assert data['plan_validation']['status'] == 'unavailable'
+    assert data['plan_validation']['status'] == 'not_checked'
     assert {issue['plan'] for issue in data['issues']} == {'draft_plan', 'accepted_plan'}
 
     before = highlight_path(song['song_id']).read_bytes()

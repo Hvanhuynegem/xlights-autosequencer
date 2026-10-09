@@ -2,13 +2,47 @@
 from __future__ import annotations
 
 import io
+import hashlib
+import json
+from dataclasses import dataclass, replace
+from threading import RLock
+from uuid import uuid4
 import random
 import tempfile
 from pathlib import Path
 from typing import Callable, Optional
 
 import numpy as np
-from src.highlights.models import HighlightState
+from src.highlights.models import HighlightPlan, HighlightState, HighlightTreatment, PlanContext
+from src.generator.preview import PreviewResult
+
+
+# Pipelines seed process-global random sources. Keep runner calls deterministic
+# when draft preparation and background exports overlap in this backend.
+_GENERATION_LOCK = RLock()
+
+
+@dataclass(frozen=True)
+class HighlightDraftRequest:
+    state: HighlightState
+    treatments: tuple[HighlightTreatment, ...]
+
+
+@dataclass(frozen=True)
+class GeneratedSectionPreview:
+    context: PlanContext
+    section_index: int
+    result: PreviewResult
+    xsq: bytes
+    assets: tuple[tuple[str, bytes], ...] = ()
+    reused: bool = False
+    content_identity: str = ""
+
+
+@dataclass(frozen=True)
+class SectionPreviewRequest:
+    section_index: int | None = None
+    cached: GeneratedSectionPreview | None = None
 
 
 class GeneratorError(Exception):
@@ -56,7 +90,9 @@ def run(
     variation_seed: Optional[int] = None,
     highlight_state: HighlightState | None = None,
     highlight_reviewed_sections: list[dict] | None = None,
-) -> bytes:
+    highlight_draft: HighlightDraftRequest | None = None,
+    section_preview: SectionPreviewRequest | None = None,
+) -> bytes | HighlightPlan | GeneratedSectionPreview:
     """Run the generator deterministically and return .xsq bytes.
 
     Args:
@@ -137,7 +173,12 @@ def run(
                     for the same song.
 
     Returns:
-        Raw .xsq XML bytes.
+        Raw .xsq XML bytes. With highlight_draft, a server-created plan compiled
+        and serialized against the real baseline instead. Draft preparation
+        does not replay the state's previously accepted plan or persist changes.
+        section_preview instead returns a GeneratedSectionPreview. Cached preview
+        serialization is reused only after rebuilding and validating live context;
+        accepted intent and writer-only inputs also participate in cache identity.
 
     Raises:
         GeneratorError: If the generator pipeline fails.
@@ -162,38 +203,48 @@ def run(
     if not layout_path.exists():
         raise GeneratorError(f"layout_path does not exist: {layout_path}")
 
-    # Seed all RNG sources deterministically from the audio hash, unless the
-    # caller supplied an explicit reroll seed.
-    seed = variation_seed if variation_seed is not None else _derive_seed(audio_hash)
-    random.seed(seed)
-    np.random.seed(seed % (2**32))
+    if highlight_draft is not None and (highlight_state is not None or section_preview is not None):
+        raise GeneratorError("Draft preparation cannot be combined with replay or preview")
 
-    try:
-        highlight_kwargs = {}
-        if highlight_state is not None and highlight_state.enabled:
-            highlight_kwargs = {"highlight_state": highlight_state,
-                                "highlight_reviewed_sections": highlight_reviewed_sections}
-        return _run_pipeline(audio_path, layout_path, seed, theme_overrides=theme_overrides,
-                              section_overrides=section_overrides,
-                              lyrics=lyrics, words=words, phonemes=phonemes,
-                              genre=genre, occasion=occasion, video_path=video_path,
-                              ignored_image_occurrences=ignored_image_occurrences,
-                              image_occurrence_overrides=image_occurrence_overrides,
-                              moving_head_keyword_motions=moving_head_keyword_motions,
-                              shadow_text_occurrences=shadow_text_occurrences,
-                              image_manual_occurrences=image_manual_occurrences,
-                              moving_head_manual_triggers=moving_head_manual_triggers,
-                              include_extra_timing=include_extra_timing,
-                              title_override=title_override, artist_override=artist_override,
-                              vocal_diarization=vocal_diarization,
-                              story_path=Path(story_path) if story_path else None,
-                              progress_cb=progress_cb, **highlight_kwargs)
-    except GeneratorError:
-        raise
-    except Exception as exc:
-        from src.generator.highlights import HighlightCompileError
-        code = exc.code if isinstance(exc, HighlightCompileError) else None
-        raise GeneratorError(f"Generator pipeline failed: {exc}", code=code) from exc
+    with _GENERATION_LOCK:
+        # Seed all RNG sources deterministically from the audio hash, unless the
+        # caller supplied an explicit reroll seed.
+        seed = variation_seed if variation_seed is not None else _derive_seed(audio_hash)
+        random.seed(seed)
+        np.random.seed(seed % (2**32))
+
+        try:
+            highlight_kwargs = {}
+            if highlight_state is not None and highlight_state.enabled:
+                highlight_kwargs = {"highlight_state": highlight_state,
+                                    "highlight_reviewed_sections": highlight_reviewed_sections}
+            if highlight_draft is not None:
+                highlight_kwargs = {"highlight_draft": highlight_draft,
+                                    "highlight_reviewed_sections": highlight_reviewed_sections}
+            if section_preview is not None:
+                highlight_kwargs["section_preview"] = section_preview
+                highlight_kwargs["highlight_reviewed_sections"] = highlight_reviewed_sections
+            return _run_pipeline(audio_path, layout_path, seed, theme_overrides=theme_overrides,
+                                  section_overrides=section_overrides,
+                                  lyrics=lyrics, words=words, phonemes=phonemes,
+                                  genre=genre, occasion=occasion, video_path=video_path,
+                                  ignored_image_occurrences=ignored_image_occurrences,
+                                  image_occurrence_overrides=image_occurrence_overrides,
+                                  moving_head_keyword_motions=moving_head_keyword_motions,
+                                  shadow_text_occurrences=shadow_text_occurrences,
+                                  image_manual_occurrences=image_manual_occurrences,
+                                  moving_head_manual_triggers=moving_head_manual_triggers,
+                                  include_extra_timing=include_extra_timing,
+                                  title_override=title_override, artist_override=artist_override,
+                                  vocal_diarization=vocal_diarization,
+                                  story_path=Path(story_path) if story_path else None,
+                                  progress_cb=progress_cb, **highlight_kwargs)
+        except GeneratorError:
+            raise
+        except Exception as exc:
+            from src.generator.highlights import HighlightCompileError
+            code = exc.code if isinstance(exc, HighlightCompileError) else None
+            raise GeneratorError(f"Generator pipeline failed: {exc}", code=code) from exc
 
 
 def _run_pipeline(
@@ -222,7 +273,9 @@ def _run_pipeline(
     progress_cb: Optional[Callable[[str, float], None]] = None,
     highlight_state: HighlightState | None = None,
     highlight_reviewed_sections: list[dict] | None = None,
-) -> bytes:
+    highlight_draft: HighlightDraftRequest | None = None,
+    section_preview: SectionPreviewRequest | None = None,
+) -> bytes | HighlightPlan | GeneratedSectionPreview:
     """Execute the full generation pipeline and return .xsq bytes."""
     from src.analyzer.orchestrator import run_orchestrator
     from src.effects.library import load_effect_library
@@ -236,9 +289,14 @@ def _run_pipeline(
     from src.variants.library import load_variant_library
 
     replay_files = {}
-    if highlight_state is not None and highlight_state.enabled:
+    if section_preview is not None or highlight_draft is not None or (highlight_state is not None and highlight_state.enabled):
         from src.generator.highlight_context import file_digest
-        replay_files = {path: file_digest(path) for path in (audio_path, layout_path)}
+        replay_paths = [audio_path, layout_path]
+        if story_path is not None:
+            replay_paths.append(Path(story_path))
+        if video_path is not None:
+            replay_paths.append(Path(video_path))
+        replay_files = {path: file_digest(path) for path in replay_paths}
 
     # Run analysis (uses cache when available)
     hierarchy = run_orchestrator(str(audio_path), fresh=False)
@@ -291,6 +349,7 @@ def _run_pipeline(
             title_override=title_override,
             artist_override=artist_override,
             highlight_state=highlight_state,
+            capture_highlight_context=highlight_draft is not None or section_preview is not None,
             highlight_reviewed_sections=highlight_reviewed_sections,
         )
 
@@ -302,6 +361,61 @@ def _run_pipeline(
         plan = build_plan(config, hierarchy, props, groups, effect_library, theme_library,
                           progress_cb=progress_cb, layout=layout)
 
+        prepared = None
+        if highlight_draft is not None:
+            from src.generator.highlights import compile_highlights
+            context = plan.highlight_context
+            state = highlight_draft.state
+            if (context.source_sha256 != state.source_sha256 or
+                    context.duration_ms != state.duration_ms):
+                raise GeneratorError("Saved events belong to different audio", code="source_changed")
+            prepared = HighlightPlan(
+                plan_id="plan_" + uuid4().hex, revision=1, context=context,
+                events=state.events, treatments=highlight_draft.treatments,
+            )
+            plan.highlight_effects = compile_highlights(
+                plan, prepared, context=context, events=state.events,
+                layout=layout, effect_library=effect_library,
+            )
+
+        if section_preview is not None:
+            from src.generator.preview import pick_representative_section, write_section_preview
+            index = section_preview.section_index
+            if index is None:
+                index = pick_representative_section([a.section for a in plan.sections])
+            if type(index) is not int or not 0 <= index < len(plan.sections):
+                raise GeneratorError("Preview section does not exist", code="invalid_section")
+            # Context describes the baseline. Accepted treatments and writer-only
+            # inputs must also match, even for callers outside the HTTP cache.
+            identity_data = dict(
+                context=plan.highlight_context.to_dict(), index=index,
+                highlights=highlight_state.to_dict() if highlight_state is not None and highlight_state.enabled else None,
+                lyrics=lyrics, words=words, phonemes=phonemes,
+                include_extra_timing=include_extra_timing, vocal_diarization=vocal_diarization,
+                title=plan.song_profile.title, artist=plan.song_profile.artist,
+                audio_name=audio_path.name, layout_name=layout_path.name,
+            )
+            identity = hashlib.sha256(json.dumps(identity_data, sort_keys=True, separators=(',', ':'),
+                                                  allow_nan=False).encode()).hexdigest()
+            cached = section_preview.cached
+            if cached is not None and cached.content_identity == identity:
+                if any(file_digest(path) != digest for path, digest in replay_files.items()):
+                    raise GeneratorError("Inputs changed during preview validation", code="generation_inputs_changed")
+                return replace(cached, reused=True)
+            preview_path = Path(tmp_dir) / "preview.xsq"
+            result = write_section_preview(
+                plan, index, preview_path, hierarchy=hierarchy, audio_path=audio_path,
+                lyrics=lyrics, words=words, phonemes=phonemes,
+                include_extra_timing=include_extra_timing, vocal_diarization=vocal_diarization,
+            )
+            assets = tuple((p.name, p.read_bytes()) for p in sorted(Path(tmp_dir).iterdir())
+                           if p.is_file() and p != preview_path)
+            assets += ((layout_path.name, layout_path.read_bytes()),)
+            if any(file_digest(path) != digest for path, digest in replay_files.items()):
+                raise GeneratorError("Inputs changed during preview generation", code="generation_inputs_changed")
+            return GeneratedSectionPreview(plan.highlight_context, index, result,
+                                           preview_path.read_bytes(), assets, content_identity=identity)
+
         # Write .xsq to a temp file, then read back as bytes
         output_path = Path(tmp_dir) / "output.xsq"
         write_xsq(plan, output_path, hierarchy=hierarchy, audio_path=audio_path,
@@ -312,4 +426,4 @@ def _run_pipeline(
         if replay_files and any(file_digest(path) != digest for path, digest in replay_files.items()):
             raise GeneratorError("Source or layout changed during highlight export; retry", code="generation_inputs_changed")
 
-        return output_path.read_bytes()
+        return prepared if prepared is not None else output_path.read_bytes()

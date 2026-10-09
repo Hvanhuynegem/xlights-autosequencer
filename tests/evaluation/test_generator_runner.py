@@ -440,3 +440,35 @@ def test_replay_uses_actual_runner_config_build_plan_and_writer(tmp_path, monkey
     with pytest.raises(runner.GeneratorError) as exc:
         runner.run(**kwargs, highlight_state=state, variation_seed=99)
     assert exc.value.code == 'stale_plan'
+
+
+def test_concurrent_runner_calls_keep_their_seed(monkeypatch, tmp_path):
+    """An export must not reseed a draft while its baseline is being built."""
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+    import random
+    from src.evaluation import generator_runner as runner
+
+    audio = tmp_path / 'song.wav'; audio.touch()
+    layout = tmp_path / 'layout.xml'; layout.touch()
+    first_entered, second_entered, release_first = Event(), Event(), Event()
+    def pipeline(audio_path, layout_path, seed, **kwargs):
+        if seed == 42:
+            first_entered.set()
+            assert release_first.wait(5)
+        else:
+            second_entered.set()
+        return str(random.random()).encode()
+    monkeypatch.setattr(runner, '_run_pipeline', pipeline)
+    def run(seed):
+        return runner.run('song', audio, 'abc12300', layout_path=layout, variation_seed=seed)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(run, 42)
+        assert first_entered.wait(5)
+        second = pool.submit(run, 99)
+        try:
+            assert not second_entered.wait(.1)
+        finally:
+            release_first.set()
+        assert first.result(timeout=5) == str(random.Random(42).random()).encode()
+        assert second.result(timeout=5) == str(random.Random(99).random()).encode()

@@ -1,9 +1,9 @@
 # AI Highlights — implementation and progress tracker
 
 Created: **2026-10-08**  
-Last updated: **2026-10-08**  
-Current state: **Live context validation and enabled saved-plan export are implemented; public plan acceptance, preview and rendering remain pending.**  
-Next task: **P4.4 public draft/acceptance workflow using the real export context, then preview/cache integration and a real render.**
+Last updated: **2026-10-09**\
+Current state: **Public plan lifecycle, saved-plan export, and validated baseline/enhanced section-preview APIs are implemented; UI and real rendering remain pending.**\
+Next task: **P3/P7 manual highlight review and A/B preview UI, then P4.2 real xLights visual verification.**
 
 ## 1. What we are building
 
@@ -45,10 +45,10 @@ The intended workflow is:
 | P1 | Versioned events, plans, and persistence contracts | P0 | In progress | Immutable records, atomic sidecars, and synthetic fixtures tested; broader contracts/bundles pending |
 | P2 | General musical-event detection | P1 | Not started | — |
 | P3 | Reviewed events and persistent user edits | P1 | In progress | Storage and manual-event API tested; compiler handoff, reconciliation, and UI pending |
-| P4 | Recipe compiler and local highlight generation | P1; P3.1 for manual events | In progress | Two recipes and live context/export replay tested; public acceptance, preview, broader composition and render pending |
+| P4 | Recipe compiler and local highlight generation | P1; P3.1 for manual events | In progress | Two recipes, public lifecycle, export and validated scoped preview tested; broader composition and render pending |
 | P5 | Optional provider client and request lifecycle | P1 | Not started | — |
 | P6 | AI lighting director and validated proposals | P2–P5 | Not started | — |
-| P7 | Complete review, preview, and export UI | P3–P6 | Not started | — |
+| P7 | Complete review, preview, and export UI | P3–P6 | In progress | Backend lifecycle and A/B preview APIs tested; UI, visual checks and backup pending |
 | P8 | Chorus motifs and development across sections | P6–P7 | Not started | — |
 | P9 | Quality evaluation and release readiness | P2–P8 | Not started | — |
 | P10 | Optional audio-model review | P9 | Deferred | — |
@@ -246,6 +246,8 @@ Depends on P1 and P3.1. Prove this path before making model-generated plans a de
   - **Accept when:** a highlight stays visible over a busy baseline, duplicate accents are avoided, protected content follows the agreed policy, and brightness does not remain incorrectly reduced after the highlight.
 
 - [ ] **P4.4 — Add semantic validation and deterministic replay.**
+  - **2026-10-09 preview progress:** [Validated scoped preview](docs/ai-highlights/preview-2026-10-09.md) rebuilds current context before cache reuse and download; input changes fail explicitly. Cache identity includes accepted intent/revision and writer-only inputs. Density and background restoration remain pending.
+  - **2026-10-09 progress:** [Public lifecycle API](docs/ai-highlights/acceptance-2026-10-09.md) prepares drafts against the real export baseline, revalidates acceptance/enable/undo, preserves accepted history, and supports reject/disable without working audio. Enabled exports reuse the saved seed. Public event → draft → accept → repeated export passes; preview freshness, density and background restoration remain pending.
   - **2026-10-08 progress:** Compiler validates supplied context/reviews, real layout/catalog targets, supported recipes, bounds, palette and physical conflicts without mutating baseline/intent. Protected or ambiguous cross-group overlaps are rejected. Live context is now built from actual audio/analysis/layout/catalogs/settings/baseline in build_plan. Export rejects stale plans, preserves accepted state, rechecks request inputs before publication and retains the used layout in its package. Public acceptance, density, background restoration and preview freshness remain unfinished.
   - Validate event/group/recipe references, timestamps, numeric bounds, prop suitability, density, conflicts, and background restoration. Treat an invalid required operation as an invalid proposal; log safe optional omissions explicitly.
   - Define and enforce one policy for rejected proposals: retain the last valid accepted plan, otherwise use the baseline and report the failure. Compile an empty plan as a no-op.
@@ -309,11 +311,13 @@ Depends on P3–P6. Extend the minimal editor from P3.3 rather than building a s
   - **Accept when:** the user can request a draft, understand each suggested highlight, and dismiss weak suggestions without opening JSON files.
 
 - [ ] **P7.2 — Compare baseline and enhanced previews.**
+  - **2026-10-09 progress:** v1 preview API supports baseline/enhanced generation with matching seeds/settings and XSQZ downloads. Scoped sections, song-level extras, timing tracks and cropped highlight ramps are preserved; stale caches are rejected. UI playback/seeking and actual xLights blend evaluation remain pending.
   - Add A/B playback for the same audio time, layout, themes, and seed. Include pre-event context so dimming and recovery can be assessed. Show planned intervals and target props.
   - Clearly identify approximated browser previews. Use actual xLights rendering for final blend/layer evaluation; the browser preview alone is insufficient evidence of the exported appearance.
   - **Accept when:** the user can compare the motivating “shhh,” seek directly to it, and verify both its buildup and the return to the rhythm.
 
 - [ ] **P7.3 — Apply, lock, undo, and regenerate.**
+  - **2026-10-09 progress:** Full-draft acceptance, rejection, enable/disable and one-step undo are available through the revision-checked API. Fresh compilation guards applying saved plans. UI, individual treatment acceptance and unlocked regeneration remain pending.
   - Support accepting individual treatments or the full draft, adjusting recipe/intensity/targets within valid ranges, locking favorites, undoing edits, and regenerating unlocked suggestions.
   - Require a fresh validation against current input revisions when applying. Warn about stale drafts with a clear replan/review action instead of silently applying them.
   - **Accept when:** editing a theme or section while an AI job runs cannot overwrite newer work, and accepted decisions survive reload and later exports.
@@ -468,8 +472,14 @@ Do not put API keys or private audio contents here. Use stable artifact paths, s
 | 2026-10-08 | P0.1–P0.4 | Corpus setup, protocol, concrete design; real API baseline exported twice | Fixed layout/theme/seed; native optional components absent | Identical XSQs; listening and rendering pending | [Baseline evidence and commands](docs/ai-highlights/baseline-2026-10-08.md) |
 | 2026-10-08 | P1.1–P1.3, P3.1 (partial) | New immutable contracts and revision-checked sidecar storage | No provider or existing generator changes | 119 focused tests passed; legacy logging isolated in test invocation | [Exact command, limitations, next steps](docs/ai-highlights/foundation-2026-10-08.md) |
 | 2026-10-08 | P1.4, P3.1 (partial) | Synthetic WAV/state/plan fixtures and real GET/PUT manual-event API | Actual source decoding, isolated state, no provider | 180 tests passed on final combined run; initial existing section polling timeout documented | [API contract, command, hashes, and limitations](docs/ai-highlights/manual-api-2026-10-08.md) |
+| 2026-10-09 | P4.4, P7.3 (partial) | Public draft/lifecycle API and repeated enabled export; shared inputs and runner seed isolation | Synthetic audio/known analysis, quiet theme, real generation; seed 42 | 1171 passed, 4 skipped, 4 non-strict xpasses; no visual claim | [API contract, exact command, limitations](docs/ai-highlights/acceptance-2026-10-09.md) |
+| 2026-10-09 | P4.4, P7.2 (partial) | v1 baseline/enhanced preview, context-validated cache/download, scoped timing/ramps/media | Same synthetic source, quiet theme, seed 42; retained packages and manifest | 1256 passed, 4 skipped, 4 non-strict xpasses; Docker daemon stopped | [API contract, artifacts, commands, limits](docs/ai-highlights/preview-2026-10-09.md) |
 
-Latest live replay evidence: [context/export report](docs/ai-highlights/live-context-2026-10-08.md). Enabled saved intent now reaches export with current context checks. Selected regression suite passed; direct default-output comparisons still match HEAD. Public plan acceptance and visual verification remain pending.
+Latest preview evidence: [2026-10-09 v1 preview report](docs/ai-highlights/preview-2026-10-09.md), **1256 passed, 4 skipped, 4 non-strict xpasses**. Retained baseline/enhanced packages demonstrate public API plumbing and fresh cache validation; UI and real render verification remain pending.
+
+Earlier public acceptance evidence: [2026-10-09 lifecycle report](docs/ai-highlights/acceptance-2026-10-09.md), **1171 passed, 4 skipped, 4 non-strict xpasses**. Full public API round-trip and deterministic export are verified with synthetic audio/known analysis; its then-pending backend preview is implemented above; real visual checks remain pending.
+
+Earlier live replay evidence: [context/export report](docs/ai-highlights/live-context-2026-10-08.md). Enabled saved intent now reaches export with current context checks. That session’s selected suite and default-output comparisons passed. Its then-pending public acceptance is implemented above; visual verification remains pending.
 
 Latest compiler evidence: [2026-10-08 report](docs/ai-highlights/compiler-2026-10-08.md), 1070 broad test passes plus four pre-existing golden failures verified against HEAD. All four current default-generation configurations match HEAD output; enhanced fixture replay is byte-identical.
 
@@ -499,19 +509,23 @@ Remaining issues and next action:
 | 2026-10-08 | Added synthetic integration fixtures and manual-event GET/PUT routes. | 180 tests pass. Event edits work through the API; lighting plans cannot yet be accepted or compiled. | P4.1–P4.2 recipes/context validation → plan acceptance → export/preview → real render. |
 | 2026-10-08 | Implemented two recipes, compiler and XSQ integration; verified saved replay and default output against HEAD. | 1070 passes; four pre-existing golden failures documented. App export/preview and visual checks pending. | Live context builder → plan acceptance → runner/export/preview → render. |
 | 2026-10-08 | Added live context, source/analysis checks, runner/export replay and generation-time layout packaging. | Selected checks pass; old golden drift remains documented. Public acceptance and preview still unavailable. | Draft/acceptance API sharing exact export settings → preview/cache → compositor/render. |
+| 2026-10-09 | Added public draft/accept/reject/disable/enable/undo, shared export inputs and saved-seed replay. | 1171 tests pass; API workflow works without sidecar editing. Enhanced preview/UI and renders pending. | Accepted-state section preview/cache → compositor/render. |
+| 2026-10-09 | Connected v1 accepted-state preview and cache/download validation; preserved scoped extras, timing layers and highlight ramps. | 1256 tests pass; synthetic baseline/enhanced packages retained. UI and visual acceptance pending. | Manual highlight/A-B UI → supported renderer → compositor/quality work. |
 
 ### Current handoff
 
-- **Active work:** first manual event-to-render slice. Live context and enabled saved-state replay now run through the actual export/runner/config/build/compiler/writer pipeline. The public API still edits only events; there is no public draft/acceptance or enable control yet.
-- **Last completed work:** `src/generator/highlight_context.py`; appended config/context fields; `build_plan` live fingerprinting/revalidation; runner snapshot forwarding and error codes; export sidecar loading, explicit baseline choice, publication guards, source fallback, and captured-layout packaging. See [live replay evidence](docs/ai-highlights/live-context-2026-10-08.md) and [design detail](openspec/changes/ai-highlights-foundation/live-context.md).
-- **Next concrete action:** implement draft preparation and accept/reject/disable/undo endpoints using the same generation input assembly as export. Capture a real baseline context (`GenerationConfig.capture_highlight_context=True`), compile supported treatments, then revalidate current inputs/revision before committing accepted state. Share the actual runner settings (reviewed sections, themes/sliders, story, vocal options, extra occurrences, source/layout, seed); do not construct an approximate context or accept a plan merely because its JSON validates.
-- **Then:** thread enabled state through section preview and cache identity, preserve/clamp song-level placements in scoped output, and perform real xLights visual checks. Preview is still baseline-only. Busy overlapping groups require P4.3 compositor work before the current recipes can usually be applied.
-- **Export behavior:** omitted `highlights` honors enabled state; `false` explicitly exports baseline and skips an unreadable sidecar; `true` requires enabled accepted state. Context mismatches fail the job with an issue code, preserving saved intent. Export does not silently fall back. Accepted snapshots in integration tests are saved via internal storage after real context capture; this is not a finished user acceptance workflow.
-- **Context identity:** actual audio SHA-256/MD5/decoded duration, hierarchy, effective/reviewed sections and story, layout tree/props/groups, effect/theme libraries, recipes, settings/seed, baseline placements and referenced asset contents. Locator paths/output directories/display titles are excluded where they are not generation inputs. Audio/analysis mismatch is an explicit reanalysis error. External file edits are not globally transactional.
-- **Verification:** see the live replay report for the exact selected regression command and final result. Actual endpoint → runner → compiler → writer → package tests use known synthetic analysis and a deliberately quiet fixture theme with real grouping/decoding/generation. They prove plumbing and serialization, not detection/visual quality. Four configurations generated with current code still match unchanged HEAD models/writer/plan exactly; old-golden tests were not rerun in this selected command. Goldens/old expectations were not edited.
-- **Artifacts:** earlier compiler-only WAV/layout/XSQs remain in `analysis/ai-highlights-compiler/2026-10-08/`; latest default-compatibility audit lives in `analysis/ai-highlights-live-context/2026-10-08/compatibility/`. Endpoint test artifacts are temporary pytest outputs. Source and fixture clock details remain in previous reports.
-- **Remaining gaps:** no public plan acceptance/UI, enhanced preview, generalized overlap arbitration, portable sidecar backup, or cross-process writer support. Complete real listening annotations/full-capability baseline and actual renders before quality claims. Earlier Docker daemon check found it stopped.
-- **Context:** `.wolf/` remains absent. Continue within the prepared first-slice authorization. Do not mark the broader P4 recipe/render or complete review workflow done from these serialization checks.
+- **Active work:** first manual event-to-render slice. Public event editing → draft/acceptance → export and validated baseline/enhanced preview now work through the real generator. User-facing controls and actual xLights visual verification remain pending.
+- **Last completed work:** `src/review/api/v1/preview.py`, production runner preview mode/cache identity, shared `write_section_preview`, bounded timing tracks, preserved adjacent sections/all song collections and interpolated clipped highlight ramps. See [preview evidence/API/artifacts](docs/ai-highlights/preview-2026-10-09.md) and [design](openspec/changes/ai-highlights-foundation/preview.md).
+- **Frontend prerequisite completed (2026-10-09):** `src/review/frontend/src/api/highlights.ts` defines typed event/plan/state/preview contracts and methods for saving reviews, draft/lifecycle actions and previews. It preserves backend revision/staleness errors via the existing client. **11 focused Vitest tests pass**, plus a targeted strict TypeScript check. No screen is wired yet; use this module for the event editor. Commands and limits are in the preview report.
+- **Next concrete action:** design and implement the manual highlight review controls in the existing UI (P3/P7): list/edit accepted events, choose supported recipes/targets, prepare/accept/reject, enable/disable/undo, and request baseline/enhanced previews with the same seed and section. The v1 API returns downloadable XSQZ, not rendered video; expose that distinction. Retain revision conflicts and stale errors instead of silently applying old drafts.
+- **Then:** complete P4.2 real xLights visibility/layer/timing checks. The supported Linux/Docker renderer needs a running daemon and renderer image/assets; current read-only check confirms Docker is stopped, and `tools/render/xlights` is absent. Native xLights exists but repository notes record headless macOS crashes. Busy cross-group overlaps remain conservatively rejected until P4.3 compositor work.
+- **Preview contract:** synchronous POST `/api/v1/songs/<id>/preview` accepts section index, highlights choice, optional seed and export vocal/timing options. GET its artifact URL downloads scoped XSQ/layout/copied media. Each call rebuilds live context; cache reuse saves serialization, not generation. Cache identity includes current context, accepted state/revision and writer inputs. Cache is memory-only (16 entries/64 MiB); changes fail explicitly or produce a new baseline artifact. Legacy brief/hash preview remains a separate API.
+- **Scope fidelity:** all intersecting sections and song-level collections survive scoped writing. The copied plan protects full-song intent from writer mutations. Model and timing intervals are bounded; clipped supported highlight On ramps preserve boundary brightness. Other clipped animations may restart their phase and are reported as approximations. No visual-quality claim follows from these serialization tests.
+- **Public lifecycle/export:** save reviews with PUT highlights; POST draft with expected revision, treatments and optional seed; POST accept with revision/draft ID. Reject/disable preserve intent without requiring audio/layout. Enable/undo revalidate. GET highlights is a cheap `not_checked` read. Enabled export/preview default to the accepted seed; explicit baseline keeps the deterministic song default, so A/B clients must pass the enhanced seed explicitly. Baseline false skips corrupt sidecars.
+- **Verification:** final selected command: **1256 passed, 4 skipped, 4 non-strict xpasses, 5 warnings**. Exact command and initial fixture corrections are in the preview report. Tests use synthetic audio/known analysis/quiet theme with real decoding, grouping, generation, compilation and writer. Existing goldens/skip markers were unchanged; historical golden drift was not reevaluated. No frontend build, full acceptance gate, listening benchmark or render was run.
+- **Artifacts:** `analysis/ai-highlights-preview/2026-10-09/` contains baseline/enhanced XSQZ, full enhanced XSQ, accepted state, synthetic WAV/layout, manifest/hashes and rerunnable capture script. Seed 42; 16-second recording; one baseline versus four enhanced placements; repeated preview was a validated cache hit. Existing shader-catalog warnings surfaced during standalone capture; quiet fixtures do not exercise those shaders. Earlier compiler/default-comparison evidence remains in prior reports.
+- **Remaining gaps:** UI playback/review, actual renders, generalized composition/background restoration, portable sidecar backup, automatic detection and listening annotations. External edits/multiple backend processes are not globally transactional. The runner lock does not cover independent legacy RNG users. `.wolf/` remains absent.
+- **Scope:** continue within the prepared first-slice authorization. Keep P4/P7 unchecked until their broader acceptance conditions, including visual review, are met.
 
 ### Reusable prompt for the next AI session
 
@@ -534,4 +548,4 @@ has evidence. Add changed paths, exact checks and results, artifact locations,
 remaining issues, and the next actionable task to the session handoff.
 ```
 
-For the next session, continue **P4.4/P7.2** draft/acceptance using the implemented live context/export path, then connect scoped preview and complete **P4.2** visual acceptance. Finish **P0.1/P0.2** listening and render evidence before detector tuning or quality claims.
+For the next session, continue **P3/P7** manual highlight and A/B preview controls, then complete **P4.2** visual acceptance with the supported renderer. Finish **P0.1/P0.2** listening and render evidence before detector tuning or quality claims.

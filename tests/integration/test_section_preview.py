@@ -630,3 +630,53 @@ def test_download_not_done_returns_409(client, tmp_path):
 
     resp = client.get("/api/song/abc123/preview/test-pending/download")
     assert resp.status_code == 409
+
+
+@pytest.mark.parametrize('with_highlights', [False, True])
+def test_preview_passes_parsed_layout_and_preserves_highlights(tmp_path, monkeypatch, with_highlights):
+    """Keep the layout handoff and compiled highlights through scoped serialization."""
+    from copy import deepcopy
+    from types import SimpleNamespace
+    from src.generator.models import GenerationConfig, EffectPlacement
+    from src.generator.xsq_writer import write_xsq
+    from src.generator.preview import CancelToken, run_section_preview
+    from src.grouper.layout import parse_layout
+
+    layout_path = Path('tests/fixtures/reference/layout.xml').resolve()
+    layout = parse_layout(layout_path)
+    monkeypatch.setattr('src.grouper.layout.parse_layout', lambda path: layout)
+    monkeypatch.setattr('src.analyzer.orchestrator.run_orchestrator',
+                        lambda *a, **k: SimpleNamespace(duration_ms=60000, events={}))
+    for module in ('effects', 'variants', 'themes'):
+        name = {'effects': 'effect', 'variants': 'variant', 'themes': 'theme'}[module]
+        monkeypatch.setattr(f'src.{module}.library.load_{name}_library', lambda **k: None)
+    plan = _make_plan(tmp_path)
+    if with_highlights:
+        # Window is 15000–35000: two crossings, one interior and two outside.
+        plan.highlight_effects = {'MatrixCenter': [
+            EffectPlacement(effect_name='On', xlights_id='On', model_or_group='MatrixCenter',
+                            start_ms=start, end_ms=end, color_palette=['#FF0000'], layer=-1)
+            for start, end in [(14000, 15000), (14750, 15250), (20000, 20500),
+                               (34750, 35250), (35000, 36000)]
+        ]}
+    original_highlights = deepcopy(plan.highlight_effects)
+    def build(config, hierarchy, props, groups, effects, themes, *, layout):
+        assert layout.raw_tree is not None
+        assert any(p.name == 'MatrixCenter' for p in layout.props)
+        assert props is layout.props
+        return plan
+    monkeypatch.setattr('src.generator.plan.build_plan', build)
+    def write(scoped, output_path, **kwargs):
+        # The hierarchy above is a stub; exercise real placement serialization.
+        kwargs['hierarchy'] = None
+        write_xsq(scoped, output_path, **kwargs)
+    monkeypatch.setattr('src.generator.xsq_writer.write_xsq', write)
+    config = GenerationConfig(audio_path=tmp_path / 'song.wav', layout_path=layout_path,
+                              output_dir=tmp_path, capture_highlight_context=True)
+    result = run_section_preview(config, 0, tmp_path / 'preview.xsq', CancelToken())
+    assert result.placement_count == (4 if with_highlights else 1)
+    effects = ET.parse(tmp_path / 'preview.xsq').findall(
+        './ElementEffects/Element[@name="MatrixCenter"]/EffectLayer/Effect')
+    assert [(int(e.get('startTime')), int(e.get('endTime'))) for e in effects] == (
+        [(0, 250), (5000, 5500), (19750, 20000)] if with_highlights else [])
+    assert plan.highlight_effects == original_highlights

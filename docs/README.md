@@ -27,6 +27,8 @@ existing-show preparation, Power Groups, and rendering and previewing.
 - **[Export Formats](export-formats.md)** — JSON, .xtiming XML, .xvc value curves
 
 ### Interface
+
+- **[AI Highlights API progress](ai-highlights/preview-2026-10-09.md)** — Validated baseline/enhanced preview API, saved-plan workflow, verification and remaining UI/render work
 - **[Review UI](review-ui.md)** — Flask server, Canvas timeline, library browser, phoneme editor
 
 ### Existing Design Docs

@@ -2797,3 +2797,31 @@ class TestSparkleFrequencyCap:
     def test_value_at_or_under_twenty_unchanged(self) -> None:
         result = _serialize_palette(["#0000FF"], music_sparkles=7)
         assert "C_SLIDER_SparkleFrequency=7" in result
+
+
+@pytest.mark.parametrize('start,end,expected', [
+    (0, 2000, []), (500, 2500, [(0, 500)]),
+    (2500, 3500, [(500, 1500)]), (3500, 4500, [(1500, 2000)]),
+    (4000, 5000, []), (1000, 5000, [(0, 2000)]),
+])
+def test_scoped_highlights_stay_inside_preview_clock(tmp_path, start, end, expected):
+    """Clip both edges, omit outside effects, and preserve full-song output."""
+    plan = _make_plan()
+    placement = EffectPlacement(
+        effect_name='On', xlights_id='On', model_or_group='HighlightTarget',
+        start_ms=start, end_ms=end, color_palette=['#FF0000'], layer=-1,
+    )
+    plan.highlight_effects = {'HighlightTarget': [placement]}
+    full = tmp_path / 'full.xsq'
+    write_xsq(plan, full)
+    original = full.read_bytes()
+    scoped = tmp_path / 'scoped.xsq'
+    write_xsq(plan, scoped, audio_offset_ms=2000, scoped_duration_ms=2000)
+    effects = ET.parse(scoped).findall(
+        './ElementEffects/Element[@name="HighlightTarget"]/EffectLayer/Effect')
+    assert [(int(e.get('startTime')), int(e.get('endTime'))) for e in effects] == expected
+    for e in ET.parse(scoped).findall('./ElementEffects/Element[@type="model"]/EffectLayer/Effect'):
+        assert 0 <= int(e.get('startTime')) < int(e.get('endTime')) <= 2000
+    assert (placement.start_ms, placement.end_ms) == (start, end)
+    write_xsq(plan, full)
+    assert full.read_bytes() == original

@@ -24,6 +24,7 @@ from flask import Response, jsonify, request, send_file, stream_with_context
 
 from . import api_v1
 from .layout import get_committed_layout
+from .generation_inputs import generation_inputs
 from src.paths import get_committed_networks_xml_path
 from src.review.storage.library import load_library
 from src.review.storage.assignments import load_session
@@ -98,47 +99,12 @@ def _run_export(state: "_ExportState", song: dict, session: dict,
 
         from src.evaluation.generator_runner import GeneratorError, run as run_generator
 
-        source_paths = song.get("source_paths") or []
-        audio_path = next((p for p in source_paths if Path(p).is_file()), "")
-        layout_xml_path = layout.get("xml_path")
-        if not layout_xml_path:
-            # Do NOT fall through to generator_runner's global-settings fallback —
-            # that resolves whatever xLights layout happens to be configured
-            # machine-wide, which silently generates against the wrong layout
-            # instead of the repo-committed one (see bug-172 follow-up).
-            raise GeneratorError(
-                "layout/xlights_rgbeffects.xml is missing from the repo checkout."
-            )
-
-        # Honor the user's per-section theme picks from the Theme screen
-        # instead of letting the generator auto-select every section.
-        theme_overrides = {
-            a["section_index"]: a["theme_id"]
-            for a in session.get("assignments", [])
-            if a.get("theme_id") and "section_index" in a
-        }
-
-        # Per-section Theme-screen slider values (brightness/hit_strength/
-        # dwell_time/color_shift), saved via PUT .../assignments/<idx>.
-        section_overrides = {
-            a["section_index"]: a["overrides"]
-            for a in session.get("assignments", [])
-            if a.get("overrides") and "section_index" in a
-        }
-
-        # The already-classified section roles/energies (verse/chorus/...)
-        # from the Theme screen -- written by analysis.py at analyze/commit
-        # time as "<audio_stem>_story.json". Without this, build_plan()
-        # silently re-derives unclassified section energies straight from
-        # raw detector boundaries, and role labels are just the raw
-        # segmentino/QM-segmenter letters (fixed 2026-07-21: this was the
-        # actual root cause of "Sections" showing N1/A_1/qm_boundary
-        # instead of verse/chorus in the exported .xsq).
-        story_path = None
-        if audio_path:
-            candidate = Path(audio_path).parent / (Path(audio_path).stem + "_story.json")
-            if candidate.exists():
-                story_path = candidate
+        inputs = generation_inputs(
+            song, session, layout, genre=genre, occasion=occasion,
+            include_extra_timing=include_extra_timing,
+            vocal_diarization=vocal_diarization, variation_seed=variation_seed,
+        )
+        audio_path, layout_xml_path = inputs["audio_path"], inputs["layout_path"]
 
         # Surface the lyric/vocal track build in the render UI: report what
         # the session carries before the generator embeds it.
@@ -197,32 +163,7 @@ def _run_export(state: "_ExportState", song: dict, session: dict,
             highlight_kwargs = {"highlight_state": highlight_state,
                                 "highlight_reviewed_sections": session.get("sections", [])}
         xsq_bytes = run_generator(
-            song_id=song["song_id"],
-            audio_path=audio_path,
-            audio_hash=song["song_id"],
-            layout_path=layout_xml_path,
-            theme_overrides=theme_overrides,
-            section_overrides=section_overrides,
-            lyrics=lyrics or None,
-            words=words or None,
-            phonemes=phonemes or None,
-            genre=genre,
-            occasion=occasion,
-            video_path=song.get("video_path"),
-            ignored_image_occurrences=session.get("ignored_image_occurrences") or None,
-            image_occurrence_overrides=session.get("image_occurrence_overrides") or None,
-            moving_head_keyword_motions=session.get("moving_head_keyword_motions") or None,
-            shadow_text_occurrences=session.get("shadow_text_occurrences") or None,
-            image_manual_occurrences=session.get("image_manual_occurrences") or None,
-            moving_head_manual_triggers=session.get("moving_head_manual_triggers") or None,
-            include_extra_timing=include_extra_timing,
-            title_override=song.get("title"),
-            artist_override=song.get("artist"),
-            vocal_diarization=vocal_diarization,
-            story_path=story_path,
-            progress_cb=_placement_progress,
-            variation_seed=variation_seed,
-            **highlight_kwargs,
+            **inputs, progress_cb=_placement_progress, **highlight_kwargs,
         )
 
         if highlight_kwargs:
@@ -349,12 +290,11 @@ def start_export(song_id: str):
         return jsonify({"error": {"code": "invalid_variation_seed", "message": str(exc)}}), 400
 
     if variation_seed is None:
-        # No explicit/reroll seed -- report the same deterministic default
-        # generator_runner.run() will derive from the song hash, so the
-        # response always carries a concrete number the caller can pin
-        # later via variation_seed instead of just "reroll" again.
+        # Saved enabled intent owns its seed. Baseline exports retain the
+        # deterministic song default; explicit seeds/rerolls above still win.
         from src.evaluation.generator_runner import _derive_seed
-        variation_seed = _derive_seed(song_id)
+        variation_seed = (highlight_state.accepted_plan.context.variation_seed
+                          if highlight_state is not None else _derive_seed(song_id))
 
     exp_id = _export_id()
     state = _ExportState(exp_id)

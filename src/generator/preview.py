@@ -17,6 +17,7 @@ import logging
 import threading
 import time
 from dataclasses import dataclass, field
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, Optional
 
@@ -280,8 +281,8 @@ def run_section_preview(
     Pipeline:
     1. build_plan(config, ...) — full plan
     2. [poll] cancel after build_plan
-    3. Extract target SectionAssignment
-    4. [poll] cancel before apply_transitions
+    3. Clone all sections and song-level effects intersecting the target window
+    4. Adjust clipped highlight ramps without changing the source plan
     5. [poll] cancel before write_xsq
     6. write_xsq with scoped_duration_ms + audio_offset_ms
 
@@ -290,10 +291,7 @@ def run_section_preview(
     """
     from src.analyzer.orchestrator import run_orchestrator
     from src.effects.library import load_effect_library
-    from src.generator.plan import build_plan, read_song_metadata
-    from src.generator.models import SequencePlan, SongProfile
-    from src.generator.transitions import TransitionConfig, apply_transitions
-    from src.generator.xsq_writer import write_xsq
+    from src.generator.plan import build_plan
     from src.grouper.classifier import classify_props, normalize_coords
     from src.grouper.grouper import generate_groups
     from src.grouper.layout import parse_layout
@@ -320,87 +318,100 @@ def run_section_preview(
     )
 
     # Stage 4: Full build_plan (all sections)
-    plan = build_plan(config, hierarchy, props, groups, effect_library, theme_library)
+    plan = build_plan(config, hierarchy, props, groups, effect_library, theme_library,
+                      layout=layout)
 
     # Poll point A: after build_plan, before filtering
     cancel_token.raise_if_cancelled()
 
-    # Validate section index
-    if section_index < 0 or section_index >= len(plan.sections):
-        raise ValueError(
-            f"section_index {section_index} out of range "
-            f"(plan has {len(plan.sections)} sections)"
-        )
-
-    target = plan.sections[section_index]
-    section = target.section
-
-    # Check if drum stem was missing (affects accent warnings)
     if config.beat_accent_effects and not hierarchy.events.get("drums"):
         warnings.append("drums stem missing — beat accents skipped")
-
-    # Compute the preview window
-    song_duration_ms = hierarchy.duration_ms or plan.song_profile.duration_ms
-    window_end_ms, window_dur_ms, crosses_boundary = _clamp_window_ms(
-        section.start_ms, section.end_ms, song_duration_ms
+    result = write_section_preview(
+        plan, section_index, output_path, hierarchy=hierarchy,
+        audio_path=config.audio_path, cancel_token=cancel_token,
     )
+    result.warnings[:0] = warnings
+    return result
 
+
+_SONG_EFFECT_COLLECTIONS = (
+    "vocal_effects", "video_effects", "crash_effects", "picture_effects",
+    "shadow_text_effects", "moving_head_effects", "highlight_effects",
+)
+
+
+def write_section_preview(plan, section_index, output_path, *, hierarchy=None,
+                          audio_path=None, cancel_token=None, lyrics=None, words=None,
+                          phonemes=None, include_extra_timing=True, vocal_diarization=False):
+    """Serialize a completed plan's window without changing its full-song intent.
+
+    Baseline assembly and highlight validation belong to the caller. Retain all
+    intersecting sections/extras; writer timestamps use the local preview clock.
+    """
+    from src.generator.xsq_writer import write_xsq
+
+    if section_index is None:
+        section_index = pick_representative_section([a.section for a in plan.sections])
+    if type(section_index) is not int or not 0 <= section_index < len(plan.sections):
+        raise ValueError(f"section_index {section_index} out of range (plan has {len(plan.sections)} sections)")
+    if cancel_token:
+        cancel_token.raise_if_cancelled()
+    target = plan.sections[section_index]
+    section = target.section
+    start = section.start_ms
+    end, duration, crosses_boundary = _clamp_window_ms(start, section.end_ms, plan.song_profile.duration_ms)
+    warnings = []
     if crosses_boundary:
-        warnings.append(
-            f"Section shorter than 10s — preview window extended to {window_dur_ms // 1000}s"
-        )
+        warnings.append(f"Section shorter than 10s — preview window extended to {duration // 1000}s")
 
-    audio_offset_ms = section.start_ms
-
-    # Build a single-section SequencePlan for the target
-    scoped_plan = SequencePlan(
-        song_profile=plan.song_profile,
-        sections=[target],
-        layout_groups=plan.layout_groups,
-        models=plan.models,
-        frame_interval_ms=plan.frame_interval_ms,
-        rotation_plan=plan.rotation_plan,
-    )
-
-    # Poll point B: before apply_transitions
-    cancel_token.raise_if_cancelled()
-
-    # Apply transitions on the single-section plan (no-op for one section)
-    transition_config = TransitionConfig(mode=config.transition_mode)
-    apply_transitions(scoped_plan.sections, transition_config, bpm=plan.song_profile.estimated_bpm)
-
-    # Poll point C: before write_xsq
-    cancel_token.raise_if_cancelled()
-
-    # Count placements
-    placement_count = sum(
-        len(placements)
-        for placements in target.group_effects.values()
-    )
-
-    # Write the scoped .xsq
-    write_xsq(
-        scoped_plan,
-        output_path,
-        hierarchy=hierarchy,
-        audio_path=config.audio_path,
-        scoped_duration_ms=window_dur_ms,
-        audio_offset_ms=audio_offset_ms,
-    )
-
-    theme_name = target.theme.name if target.theme else "unknown"
-
+    # The writer rewrites media paths and some layer settings. Never expose the
+    # original full plan to those changes when producing a scoped artifact.
+    scoped = deepcopy(plan)
+    scoped.sections = [a for a in scoped.sections
+                       if a.section.start_ms < end and a.section.end_ms > start]
+    partial_animation = False
+    def visible(collection, *, highlights=False):
+        nonlocal partial_animation
+        result = {}
+        for name, placements in collection.items():
+            kept = []
+            for p in placements:
+                if p.start_ms >= end or p.end_ms <= start:
+                    continue
+                clipped_start, clipped_end = max(start, p.start_ms), min(end, p.end_ms)
+                if (clipped_start, clipped_end) != (p.start_ms, p.end_ms):
+                    first, last = "E_TEXTCTRL_Eff_On_Start", "E_TEXTCTRL_Eff_On_End"
+                    if highlights and p.effect_name == "On" and all(
+                            type(p.parameters.get(k)) in (int, float) for k in (first, last)):
+                        initial, final = p.parameters[first], p.parameters[last]
+                        length = p.end_ms - p.start_ms
+                        p.parameters[first] = round(initial + (final - initial) * (clipped_start - p.start_ms) / length)
+                        p.parameters[last] = round(initial + (final - initial) * (clipped_end - p.start_ms) / length)
+                        p.start_ms, p.end_ms = clipped_start, clipped_end
+                    else:
+                        partial_animation = True
+                kept.append(p)
+            if kept:
+                result[name] = kept
+        return result
+    for assignment in scoped.sections:
+        assignment.group_effects = visible(assignment.group_effects)
+    for name in _SONG_EFFECT_COLLECTIONS:
+        setattr(scoped, name, visible(getattr(scoped, name), highlights=name == "highlight_effects"))
+    if partial_animation:
+        warnings.append("Effects cut by preview boundaries may restart their animation; verify the full sequence in xLights")
+    count = sum(len(ps) for a in scoped.sections for ps in a.group_effects.values())
+    count += sum(len(ps) for name in _SONG_EFFECT_COLLECTIONS for ps in getattr(scoped, name).values())
+    if cancel_token:
+        cancel_token.raise_if_cancelled()
+    write_xsq(scoped, output_path, hierarchy=hierarchy, audio_path=audio_path,
+              scoped_duration_ms=duration, audio_offset_ms=start, lyrics=lyrics,
+              words=words, phonemes=phonemes, include_extra_timing=include_extra_timing,
+              vocal_diarization=vocal_diarization)
     return PreviewResult(
-        section={
-            "label": section.label,
-            "start_ms": section.start_ms,
-            "end_ms": section.end_ms,
-            "energy_score": section.energy_score,
-            "role": section.label,
-        },
-        window_ms=window_dur_ms,
-        theme_name=theme_name,
-        placement_count=placement_count,
-        artifact_url="",  # Filled in by the route handler after job completion
-        warnings=warnings,
+        section={"label": section.label, "start_ms": section.start_ms,
+                 "end_ms": section.end_ms, "energy_score": section.energy_score,
+                 "role": section.label, "index": section_index},
+        window_ms=duration, theme_name=target.theme.name if target.theme else "unknown",
+        placement_count=count, artifact_url="", warnings=warnings,
     )
